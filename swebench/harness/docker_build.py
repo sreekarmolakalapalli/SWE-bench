@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import logging
 import re
 import traceback
 import docker
+import docker.errors
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -241,7 +244,7 @@ def get_env_configs_to_build(
                 # Remove the environment image if it was built after the base_image
                 for dep in find_dependent_images(client, test_spec.env_image_key):
                     # Remove instance images that depend on this environment image
-                    remove_image(client, dep.image_id, "quiet")
+                    remove_image(client, dep, "quiet")
                 remove_image(client, test_spec.env_image_key, "quiet")
                 image_exists = False
         except docker.errors.ImageNotFound:
@@ -315,8 +318,8 @@ def build_env_images(
                     traceback.print_exc()
                     failed.append(futures[future])
                     continue
-                except Exception as e:
-                    print(f"Error building image")
+                except Exception:
+                    print("Error building image")
                     traceback.print_exc()
                     failed.append(futures[future])
                     continue
@@ -390,8 +393,8 @@ def build_instance_images(
                     traceback.print_exc()
                     failed.append(futures[future])
                     continue
-                except Exception as e:
-                    print(f"Error building image")
+                except Exception:
+                    print("Error building image")
                     traceback.print_exc()
                     failed.append(futures[future])
                     continue
@@ -409,7 +412,7 @@ def build_instance_images(
 def build_instance_image(
         test_spec: TestSpec,
         client: docker.DockerClient,
-        logger: logging.Logger,
+        logger: logging.Logger|None,
         nocache: bool,
     ):
     """
