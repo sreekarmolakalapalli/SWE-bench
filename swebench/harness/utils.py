@@ -328,3 +328,6 @@ def str2bool(v):
         return False
     else:
         raise ArgumentTypeError("Boolean value expected.")
+
+def extract_new_test_command(diff) -> str:
+    pass

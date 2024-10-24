@@ -42,6 +42,8 @@ class TestSpec:
     repo_script_list: list[str]
     eval_script_list: list[str]
     env_script_list: list[str]
+    gold_patch: str
+    test_patch: str
     arch: str
     FAIL_TO_PASS: list[str]
     PASS_TO_PASS: list[str]
@@ -291,6 +293,7 @@ def make_test_spec(instance: SWEbenchInstance) -> TestSpec:
     problem_statement = instance["problem_statement"]
     hints_text = instance["hints_text"]  # Unused
     test_patch = instance["test_patch"]
+    gold_patch = instance["patch"]
 
     def _from_json_or_obj(key: str) -> Any:
         """If key points to string, load with json"""
@@ -322,6 +325,8 @@ def make_test_spec(instance: SWEbenchInstance) -> TestSpec:
         env_script_list=env_script_list,
         repo_script_list=repo_script_list,
         eval_script_list=eval_script_list,
+        gold_patch=gold_patch,
+        test_patch=test_patch,
         version=version,
         arch=arch,
         FAIL_TO_PASS=fail_to_pass,
