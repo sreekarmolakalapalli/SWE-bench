@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import platform
@@ -126,11 +128,11 @@ def make_repo_script_list(specs, repo, repo_directory, base_commit, env_name):
         f"cd {repo_directory}",
         f"git reset --hard {base_commit}",
         # Remove the remote so the agent won't see newer commits.
-        f"git remote remove origin",
+        "git remote remove origin",
         # Make sure conda is available for later use
         "source /opt/miniconda3/bin/activate",
         f"conda activate {env_name}",
-        f'echo "Current environment: $CONDA_DEFAULT_ENV"',
+        'echo "Current environment: $CONDA_DEFAULT_ENV"',
     ]
     if repo in MAP_REPO_TO_INSTALL:
         setup_commands.append(MAP_REPO_TO_INSTALL[repo])
@@ -145,10 +147,34 @@ def make_repo_script_list(specs, repo, repo_directory, base_commit, env_name):
     return setup_commands
 
 
-def make_env_script_list(instance, specs, env_name):
+def replace_uninstallable_packages_requirements_txt(requirement_str: str) -> str:
+    """Replaces certain packages in a requirements.txt-like string.
+    For example, some packages have been yanked and we need to replace them with compatible alternatives.
+    """
+    replacements = {
+        # See https://github.com/princeton-nlp/SWE-bench/issues/199
+        # This package was sinced yanked, so we need to force pip
+        # to install it.
+        "types-pkg_resources": "types-pkg-resources==0.1.3",
+    }
+    requirements = [req.strip() for req in requirement_str.split("\n") if req.strip()]
+    requirements_replaced = []
+    for requirement in requirements:
+        if requirement in replacements:
+            print(f"Replaced {requirement!r} with {replacements[requirement]!r} (replace_uninstallable_packages)")
+            requirements_replaced.append(replacements[requirement])
+        else:
+            requirements_replaced.append(requirement)
+    return "\n".join(requirements_replaced) + "\n"
+
+
+def make_env_script_list(instance: SWEbenchInstance, specs: dict, env_name: str) -> list[str]:
     """
     Creates the list of commands to set up the conda environment for testing.
     This is the setup script for the environment image.
+
+    Returns:
+        list[str]: List of commands to set up the conda environment
     """
     HEREDOC_DELIMITER = "EOF_59812759871"
     reqs_commands = [
@@ -162,7 +188,7 @@ def make_env_script_list(instance, specs, env_name):
         reqs_commands.append(cmd)
 
         # Install dependencies
-        reqs = get_requirements(instance)
+        reqs = replace_uninstallable_packages_requirements_txt(get_requirements(instance))
         path_to_reqs = "$HOME/requirements.txt"
         reqs_commands.append(
             f"cat <<'{HEREDOC_DELIMITER}' > {path_to_reqs}\n{reqs}\n{HEREDOC_DELIMITER}"
@@ -228,7 +254,7 @@ def make_eval_script_list(instance, specs, env_name, repo_directory, base_commit
         ]
     )
     eval_commands = [
-        f"source /opt/miniconda3/bin/activate",
+        "source /opt/miniconda3/bin/activate",
         f"conda activate {env_name}",
         f"cd {repo_directory}",
     ]
@@ -238,8 +264,8 @@ def make_eval_script_list(instance, specs, env_name, repo_directory, base_commit
         f"git config --global --add safe.directory {repo_directory}",  # for nonroot user
         f"cd {repo_directory}",
         # This is just informational, so we have a record
-        f"git status",
-        f"git show",
+        "git status",
+        "git show",
         f"git diff {base_commit}",
         "source /opt/miniconda3/bin/activate",
         f"conda activate {env_name}",
