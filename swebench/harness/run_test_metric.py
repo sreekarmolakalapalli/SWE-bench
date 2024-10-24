@@ -116,5 +116,5 @@ def run_test_smells(patch) -> float:
     return 0.5
     
 def run_similarity_score(patch) -> float:
-    return 0.5
+    return 0.6
         
