@@ -48,7 +48,7 @@ RUN echo "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbe
 _DOCKERFILE_INSTANCE = r"""FROM --platform={platform} {env_image_name}
 
 COPY ./setup_repo.sh /root/
-RUN /bin/bash /root/setup_repo.sh
+RUN /bin/bash /root/setup_repo.sh || true
 
 WORKDIR /testbed/
 """

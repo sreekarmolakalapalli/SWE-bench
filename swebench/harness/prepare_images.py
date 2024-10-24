@@ -73,6 +73,8 @@ def main(
     # Filter out instances that were not specified
     dataset = load_swebench_dataset(dataset_name, split)
     dataset = filter_dataset_to_build(dataset, instance_ids, client, force_rebuild)
+    if not instance_ids:
+        instance_ids = [instance['instance_id'] for instance in dataset]
 
     # Build images for remaining instances
     successful, failed = build_instance_images(

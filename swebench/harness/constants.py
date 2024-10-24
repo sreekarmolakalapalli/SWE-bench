@@ -855,7 +855,7 @@ SPECS_PVLIB = {
     k: {
         "python": "3.9",
         "install": "python -m pip install -e .[all]",
-        "packages": "pandas scipy",
+        "packages": "pandas scipy pkgconfig",
         "pip_packages": ["jupyter", "ipython", "matplotlib", "pytest", "flake8"],
         "test_cmd": TEST_PYTEST,
     }
@@ -924,7 +924,7 @@ MAP_REPO_VERSION_TO_SPECS = {
 }
 
 # Constants - Repository Specific Installation Instructions
-MAP_REPO_TO_INSTALL = {}
+MAP_REPO_TO_INSTALL = {"pvlib/pvlib-python":"apt-get update && apt-get install libhdf5-dev"}
 
 
 # Constants - Task Instance Requirements File Paths

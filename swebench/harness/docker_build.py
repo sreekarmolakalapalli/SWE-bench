@@ -294,7 +294,11 @@ def build_env_images(
                 executor.submit(
                     build_image,
                     image_name,
-                    {"setup_env.sh": config["setup_script"]},
+                    {
+                        "setup_env.sh": config["setup_script"].replace(
+                            "types-pkg_resources", "types-setuptools"
+                        )
+                    },
                     config["dockerfile"],
                     config["platform"],
                     client,
