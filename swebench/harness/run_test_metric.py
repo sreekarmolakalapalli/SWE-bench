@@ -258,8 +258,20 @@ def run_instance(
     return (smell_weighted_score, similarity_weighted_score, score)
 
 
-def run_test_smells(patch) -> float:
-    return 0.5
+#def run_test_smells(patch) -> float:
+#   return 0.5
+def run_test_smells(test_patch: str) -> float:
+    # Start with score of 1.0
+    smell_score = 1.0 
+    # 1. Resource Optimism (e.g., open files without try/catch)
+    if "open(" in test_patch and "try:" not in test_patch:
+        smell_score -= 0.2
+    # 2. Duplicate setup code
+
+
+    return max(smell_score, 0)
+
+
     
 def run_similarity_score(patch) -> float:
     return 0.5
