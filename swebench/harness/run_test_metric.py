@@ -13,6 +13,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from tqdm import tqdm
 
+from crystalbleu import CrystalBLEU
+
 from swebench.harness.constants import (
     APPLY_PATCH_FAIL,
     APPLY_PATCH_PASS,
@@ -259,22 +261,58 @@ def run_instance(
 
 
 #def run_test_smells(patch) -> float:
-#   return 0.5
+#  return 0.5
 def run_test_smells(test_patch: str) -> float:
-    # Start with score of 1.0
-    smell_score = 1.0 
-    # 1. Resource Optimism (e.g., open files without try/catch)
+    # Starting with a perfect score of 1.0.
+    smell_score = 1.0
+
+    # 1. open files without try/catch
     if "open(" in test_patch and "try:" not in test_patch:
         smell_score -= 0.2
-    # 2. Duplicate setup code
-
-
-    return max(smell_score, 0)
-
+    
+    # 2. Dupilicate Setup Code 
+    setup_matches = re.findall(r"def setUp\(\):", test_patch)
+    if len(setup_matches) > 1:
+        smell_score -= 0.2 
+    
+    # 3. Check for overly generic mock usage 
+    if "mock" in test_patch and "return_value" not in test_patch:
+        smell_score -= 0.2 
+    
+    # 4. Verbose Setup 
+    setup_code = re.search(r"def setUp\(.*?\):([\s\S]+?)def ", test_patch)
+    if setup_code and len(setup_code.group(1).splitlines()) > 10:
+        smell_score -= 0.2
+    
+    return max(smell_score, 0.5)
 
     
-def run_similarity_score(patch) -> float:
-    return 0.5
+def run_similarity_score(test_patch: str, reference_patch: str) -> float:
+    # Generate a similarity ratio between test patch and reference patch.
+    similarity_ratio = difflib.SequenceMatcher(None, test_patch, reference_patch).ratio()
+
+    # Adjust weight
+    weighted_similarity_score = similarity_ratio * 1.0
+    return weighted_similarity_score
+
+## Compares a test patch to a reference patch using CrystalBLEU, applying the similarity score as a weighting factor.
+def weighted_similarity_score(test_patch: str, gold_patch: str, base_score: float = 1.0) -> dict:
+    # Initialize CrystalBLEU
+    crystal_bleu = CrystalBLEU()
+    
+    # Calculate similarity ratio between test and reference patches
+    similarity_ratio_crystalbleu = crystal_bleu.get_similarity(test_patch, gold_patch)
+    weighted_crystalbleu_score = base_score * similarity_ratio_crystalbleu
+
+    # Reinforest metrics 
+
+    # Compile scores in a dictionary
+    scores = {
+        "CrystalBLEU_weighted_score": weighted_crystalbleu_score,
+        # "REINFOREST_weighted_score": weighted_reinforest_score,
+    }
+
+    return scores
 
 def run_instances(
         predictions: dict,
