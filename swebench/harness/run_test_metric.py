@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from tqdm import tqdm
 
-from crystalbleu import CrystalBLEU
+# from crystalbleu import CrystalBLEU
 
 from swebench.harness.constants import (
     APPLY_PATCH_FAIL,
@@ -135,7 +135,7 @@ def make_eval_script_list(repo, version, specs, env_name, repo_directory, base_c
 
 def run_instance(
         test_spec: TestSpec,
-        pred_patch: str,
+        prediction: dict,
         rm_image: bool,
         force_rebuild: bool,
         client: docker.DockerClient,
@@ -157,7 +157,8 @@ def run_instance(
     container.start()
 
     pred_patch = test_spec.test_patch
-    # pred_cmd = f"pytest {test_spec.FAIL_TO_PASS[0]}"
+    ## COMMENTED OUT CODE BELOW IS FOR THE REAL RUN, ABOVE IS A PLACEHOLDER FOR DEVELOPMENT
+    # pred_patch = prediction['model_patch']
 
     eval_script_list = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, pred_patch)
     eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
