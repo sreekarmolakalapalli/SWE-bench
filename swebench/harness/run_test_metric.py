@@ -8,6 +8,8 @@ import logging
 import re
 import os
 
+import difflib
+
 from argparse import ArgumentParser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -460,6 +462,41 @@ def get_gold_predictions(dataset_name: str, split: str):
         } for datum in dataset
     ]
 
+
+# RQ3 - TESTING METRICS USING AGENTLESS GENERATED UNIT TESTS.
+# Load generated tests for evaluation.
+def load_generated_tests(): 
+    generated_tests = [
+        {
+            'instance_id': 'astropy__astropy-12907',
+            'model_patch': "diff --git a/astropy/modeling/separable.py b/astropy/modeling/separable.py\n--- a/astropy/modeling/separable.py\n+++ b/astropy/modeling/separable.py\n@@ -242,7 +242,7 @@ def _cstack(left, right):\n         cright = np.zeros((noutp, right.shape[1]))\n-        cright[-right.shape[0]:, -right.shape[1]:] = 1\n+        cright[-right.shape[0]:, -right.shape[1]:] = right\n \n     return np.hstack([cleft, cright])\n \n",
+            'model_name_or_path': 'gold'
+        },
+        # Add more instances
+    ]
+    return generated_tests
+
+def evaluate_test(instance):
+    # Evaluate a single test instance.
+    instance_id = instance['instance_id']
+    model_patch = instance['model_patch']
+    model_name_or_path = instance['model_name_or_path']
+    
+    # Example of using CrystalBLEU to compare patches; replace with actual evaluation logic
+    gold_patch = "<gold standard test string here>"  # Substitute with actual gold standard test
+    similarity_score = calculate_crystalbleu(model_patch, gold_patch)
+
+    # Return results
+    return {
+        'instance_id': instance_id,
+        'similarity_score': similarity_score,
+        'model_name_or_path': model_name_or_path
+    }
+
+
+
+
+
 def main(
         dataset_name: str,
         split: str,
@@ -508,8 +545,31 @@ def main(
         build_env_images(client, dataset, force_rebuild, max_workers)
         run_instances(predictions, dataset, cache_level, clean, force_rebuild, max_workers, run_id, timeout)
 
+    # Run evaluation with test_metrics.py
+    run_test_metrics_evaluation(predictions, dataset)
+
     # clean images + make final report
     clean_images(client, existing_images, cache_level, clean)
+
+def run_test_metrics_evaluation(predictions):
+    # Write predictions to a temporary JSON file for test_metrics.py to read
+    predictions_file = "temp_predictions.json"
+    with open(predictions_file, "w") as f:
+        json.dump(predictions, f)
+
+    # Call test_metrics.py with the path to the temporary predictions file
+    result = subprocess.run(
+        ["python3", "test_metrics.py", "--predictions", predictions_file],
+        capture_output=True,
+        text=True
+    )
+
+    # Output results from test_metrics.py
+    print("Evaluation Results:", result.stdout)
+
+    # Clean up the temporary predictions file
+    os.remove(predictions_file)
+    
 
 if __name__ == "__main__":
     parser = ArgumentParser()
