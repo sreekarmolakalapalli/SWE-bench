@@ -7,6 +7,7 @@ import traceback
 import logging
 import re
 import os
+import subprocess
 
 import difflib
 
@@ -15,7 +16,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from tqdm import tqdm
 
-# from crystalbleu import CrystalBLEU
+from crystalbleu import CrystalBLEU
+from crystalbleu import BLEU
 
 from swebench.harness.constants import (
     APPLY_PATCH_FAIL,
@@ -475,6 +477,13 @@ def load_generated_tests():
         # Add more instances
     ]
     return generated_tests
+# Create a BLEU object
+bleu = BLEU()
+
+def calculate_crystalbleu(model_patch, gold_patch):
+    # Calculate the BLEU score between the model's generated test (candidate) and the gold standard test (reference)
+    score = bleu.score(gold_patch, model_patch)
+    return score
 
 def evaluate_test(instance):
     # Evaluate a single test instance.
