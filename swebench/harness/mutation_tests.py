@@ -7,6 +7,7 @@ import traceback
 import logging
 import re
 import os
+import pandas as pd
 
 from argparse import ArgumentParser
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -166,12 +167,14 @@ def run_instance(
     eval_script_list, test_command = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, test_patch)
     eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
 
-    log_dir = Path(f"logs/run_metric/{instance_id}")
+    log_dir = Path(f"logs/{run_id}/mutation_tests/{instance_id}")
     log_dir.mkdir(parents=True, exist_ok=True)
     eval_file = Path(log_dir / "eval.sh")
     eval_file.write_text(eval_script)
     copy_to_container(container, eval_file, Path("/eval.sh"))
 
+    if repo == "django/django":
+        directives = "./tests/runtests.py"
     cosmic_file = Path(log_dir / "mutation.toml")
     cosmic_file.write_text("\n".join([
         '[cosmic-ray]',
@@ -226,15 +229,23 @@ def run_instance(
                 instance_id,
                 f"Test timed out after {timeout} seconds.",
             )
-    # result1 = container.exec_run(pred_cmd, workdir="/testbed", user="root")
-    eval_sm1, _ = get_logs_eval(result1_output_path)
+    surviving_pattern = r'\bsurviving mutants\b'
+    total_pattern = r'\btotal jobs\b'
+
+    row = pd.DataFrame({
+            "instance_id": [instance_id],
+            "surviving_percentage": [float(find_matching_lines(result1_output_path, surviving_pattern).split(" ")[-1].strip("(%)\n"))],
+            "total_mutants": [int(find_matching_lines(result1_output_path, total_pattern).split(" ")[-1])]
+        })
 
     cleanup_container(client, container, dummy_logger)
     if rm_image:
         remove_image(client, test_spec.instance_image_key, dummy_logger)
     close_logger(dummy_logger)
-
-    return None
+    
+    results = pd.read_csv(Path(f"logs/{run_id}/mutation_tests/results.csv"))
+    results = pd.concat([results, row], ignore_index=True)
+    results.to_csv(Path(f"logs/{run_id}/mutation_tests/results.csv"))
 
 def run_instances(
         predictions: dict,
@@ -270,6 +281,18 @@ def run_instances(
     }
     if not force_rebuild and len(existing_images):
         print(f"Found {len(existing_images)} existing instance images. Will reuse them.")
+
+    log_dir = Path(f"logs/{run_id}/mutation_tests/")
+    log_file = Path(log_dir / "results.csv")
+    if not log_file.exists():
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
+        init_dataframe = pd.DataFrame({
+            "instance_id": [],
+            "surviving_percentage": [],
+            "total_mutants": [],
+        })
+        init_dataframe.to_csv(log_file)
 
     # run instances in parallel
     print(f"Running {len(instances)} instances...")
@@ -348,11 +371,11 @@ def get_dataset_from_preds(
             continue
         prediction = predictions[instance[KEY_INSTANCE_ID]]
         report_file = (
-            RUN_EVALUATION_LOG_DIR
+            Path("logs")
             / run_id
-            / prediction["model_name_or_path"].replace("/", "__")
+            / "mutation_tests"
             / prediction[KEY_INSTANCE_ID]
-            / "report.json"
+            / "result_output1.txt"
         )
         if report_file.exists():
             completed_ids.add(instance[KEY_INSTANCE_ID])
@@ -380,6 +403,14 @@ def get_gold_predictions(dataset_name: str, split: str):
             "model_name_or_path": "gold",
         } for datum in dataset
     ]
+
+def find_matching_lines(filepath, pattern):
+    regex = re.compile(pattern)
+
+    with open(filepath, 'r') as file:
+        for line in file:
+            if regex.search(line):
+                return line
 
 def main(
         dataset_name: str,
@@ -441,7 +472,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_workers", type=int, default=4, help="Maximum number of workers (should be <= 75%% of CPU cores)")
     parser.add_argument("--open_file_limit", type=int, default=4096, help="Open file limit")
     parser.add_argument(
-        "--timeout", type=int, default=1_800, help="Timeout (in seconds) for running tests for each instance"
+        "--timeout", type=int, default=None, help="Timeout (in seconds) for running tests for each instance"
         )
     parser.add_argument(
         "--force_rebuild", type=str2bool, default=False, help="Force rebuild of all images"
