@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from tqdm import tqdm
 
-from crystalbleu import CrystalBLEU
+# from crystalbleu import CrystalBLEU
 from crystalbleu import BLEU
 
 from swebench.harness.constants import (
@@ -467,6 +467,8 @@ def get_gold_predictions(dataset_name: str, split: str):
 
 # RQ3 - TESTING METRICS USING AGENTLESS GENERATED UNIT TESTS.
 # Load generated tests for evaluation.
+# currently uses hardcoded test data
+# I should modify in such a way that it can read from a JSON file when the generated tests are saved by generate_reproduction_tests.py.
 def load_generated_tests(): 
     generated_tests = [
         {
@@ -477,6 +479,16 @@ def load_generated_tests():
         # Add more instances
     ]
     return generated_tests
+
+# Read from JSON (not hardcoded):
+""" 
+def load_generated_tests(file_path='generated_tests.json'):
+    with open(file_path, 'r') as file:
+        generated_tests = json.load(file)
+    return generated_tests
+ """
+
+# We need to verify that this scoring logic works with your patches
 # Create a BLEU object
 bleu = BLEU()
 
@@ -501,9 +513,6 @@ def evaluate_test(instance):
         'similarity_score': similarity_score,
         'model_name_or_path': model_name_or_path
     }
-
-
-
 
 
 def main(
