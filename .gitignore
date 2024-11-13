@@ -170,3 +170,4 @@ cython_debug/
 data/repos/copies
 notebooks/
 *logs/
+swebench/harness/models
