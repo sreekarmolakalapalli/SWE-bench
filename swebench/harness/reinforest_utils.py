@@ -1,10 +1,15 @@
 import torch
+import re
 import numpy as np
+import os
+import subprocess
 
 from typing import Optional, Union, List
 
 from torch import nn
-from transformers import AutoModel, PreTrainedTokenizer
+from transformers import AutoModel, PreTrainedTokenizer, BertModel
+from swebench.harness.utils import load_swebench_dataset
+from swebench.harness.run_test_metric import get_test_directives
 
 class CrossMatchLoss(nn.Module):
     def __init__(
@@ -241,3 +246,71 @@ def get_vector(
         if not batched:
             vector = vector.squeeze(0)
         return vector.cpu().numpy().tolist()
+
+def parse_test_command(command):
+
+    pattern = r'(?P<file_path>[\w/\\.-]+)(?:[:.]{2,}|\.)(?P<test_name>[\w.]+)'
+
+    match = re.search(pattern, command)
+    if not match:
+        raise ValueError("Command format not recognized. Make sure it's a pytest or unittest command.")
+    
+    file_path = match.group('file_path')
+    test_name = match.group('test_name').replace('.', '::')
+
+    return file_path, test_name
+
+
+def extract_test_source(filepath, test_name):
+    with open(f"astropy/{filepath}", 'r') as file:
+        lines = file.readlines()
+    
+    test_code = []
+    in_test = False
+    
+    function_pattern = re.compile(rf"def {re.escape(test_name)}\b")
+
+    for line in lines:
+        if function_pattern.search(line):
+            in_test = True
+        if in_test:
+            test_code.append(line)
+            if line.strip() == "" or line.startswith("def "):
+                in_test = False
+                break
+
+    return "".join(test_code)
+
+def create_playground(repo: str, commit_sha: str):
+    rel_repo_path = repo.split("/")[-1]
+    if not os.path.exists(rel_repo_path):
+        print(f"repo {repo} does not exist. Cloning now...")
+        subprocess.run(["git", "clone", f"https://github.com/{repo}.git"], check=True)
+    else:
+        print(f"repo {repo} already exists. Skipping cloning.")
+    
+    os.chdir(rel_repo_path)
+    
+    subprocess.run(["git", "reset", "--hard"])
+    subprocess.run(["git", "fetch", "--all"], check=True)
+    subprocess.run(["git", "checkout", commit_sha], check=True)
+
+    print(f"Checked out commit {commit_sha} in {repo} and changed directory to {rel_repo_path}")
+
+def test():
+    dataset = load_swebench_dataset(instance_ids=["astropy__astropy-12907"])
+    sample = dataset[0]
+    ref_patch = gold_patch = sample["test_patch"]
+    repo = sample["repo"]
+    create_playground(repo, sample["base_commit"])
+    directives = get_test_directives(repo, ref_patch)
+    file_path, test_name = parse_test_command(directives[0])
+    ref_func = gold_func = extract_test_source(file_path, test_name)
+
+    model = AutoModel.from_pretrained("swebench/harness/models/atcoder/semantic_data/python/with_score/codebert_0.2-0.2/checkpoint-best-eval_rank_gap/pytorch_model.bin")
+
+    ref_vector = get_vector()
+
+
+if __name__ == "__main__":
+    test()
