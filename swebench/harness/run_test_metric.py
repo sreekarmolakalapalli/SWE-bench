@@ -16,8 +16,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from tqdm import tqdm
 
-# from crystalbleu import CrystalBLEU
-from crystalbleu import BLEU
+from crystalbleu import CrystalBLEU
+from nltk.translate.bleu_score import sentence_bleu
+# from crystalbleu import sentence_bleu
 
 from swebench.harness.constants import (
     APPLY_PATCH_FAIL,
@@ -486,16 +487,20 @@ def load_generated_tests(file_path='generated_tests.json'):
     with open(file_path, 'r') as file:
         generated_tests = json.load(file)
     return generated_tests
- """
+"""
 
 # We need to verify that this scoring logic works with your patches
-# Create a BLEU object
-bleu = BLEU()
 
+# Calculates the CrystalBLEU score for a generated test (model_patch) against a reference test (gold_patch). 
 def calculate_crystalbleu(model_patch, gold_patch):
-    # Calculate the BLEU score between the model's generated test (candidate) and the gold standard test (reference)
-    score = bleu.score(gold_patch, model_patch)
+    # sentence_bleu expects a tokenized reference and candidate
+    model_patch_tokens = model_patch.split()
+    gold_patch_tokens = gold_patch.split()
+    
+    # Calculate BLEU score for the model's patch against the gold patch
+    score = sentence_bleu([gold_patch_tokens], model_patch_tokens)
     return score
+
 
 def evaluate_test(instance):
     # Evaluate a single test instance.
@@ -564,7 +569,7 @@ def main(
         run_instances(predictions, dataset, cache_level, clean, force_rebuild, max_workers, run_id, timeout)
 
     # Run evaluation with test_metrics.py
-    run_test_metrics_evaluation(predictions, dataset)
+    #run_test_metrics_evaluation(predictions, dataset)
 
     # clean images + make final report
     clean_images(client, existing_images, cache_level, clean)
