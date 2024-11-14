@@ -4,10 +4,12 @@ import numpy as np
 import os
 import subprocess
 
+from pathlib import Path
+
 from typing import Optional, Union, List
 
 from torch import nn
-from transformers import AutoModel, PreTrainedTokenizer, BertModel
+from transformers import AutoModel, PreTrainedTokenizer, BertModel, AutoTokenizer
 from swebench.harness.utils import load_swebench_dataset
 from swebench.harness.run_test_metric import get_test_directives
 
@@ -257,12 +259,14 @@ def parse_test_command(command):
     
     file_path = match.group('file_path')
     test_name = match.group('test_name').replace('.', '::')
+    if ".py" not in file_path:
+        file_path = file_path + ".py"
 
     return file_path, test_name
 
 
 def extract_test_source(filepath, test_name):
-    with open(f"astropy/{filepath}", 'r') as file:
+    with open(f"{filepath}", 'r') as file:
         lines = file.readlines()
     
     test_code = []
@@ -282,6 +286,12 @@ def extract_test_source(filepath, test_name):
     return "".join(test_code)
 
 def create_playground(repo: str, commit_sha: str):
+    playground_path = Path("./playground")
+    if not os.path.exists(playground_path):
+        os.mkdir(playground_path)
+
+    os.chdir(playground_path)
+
     rel_repo_path = repo.split("/")[-1]
     if not os.path.exists(rel_repo_path):
         print(f"repo {repo} does not exist. Cloning now...")
@@ -297,20 +307,38 @@ def create_playground(repo: str, commit_sha: str):
 
     print(f"Checked out commit {commit_sha} in {repo} and changed directory to {rel_repo_path}")
 
+def load_model(model, ckpt_under_check, dont_load=False):
+    if not dont_load:
+        ckpt_file = os.path.join(ckpt_under_check, 'pytorch_model.bin')
+        if not os.path.exists(ckpt_file):
+            print('Model file does not exist. Please train first!')
+            exit()
+        with open(ckpt_file, 'rb') as fp:
+            model.load_state_dict(torch.load(fp, map_location="mps"))
+
 def test():
-    dataset = load_swebench_dataset(instance_ids=["astropy__astropy-12907"])
+    dataset = load_swebench_dataset(instance_ids=["astropy__astropy-12907", "astropy__astropy-14182"])
     sample = dataset[0]
-    ref_patch = gold_patch = sample["test_patch"]
+    ref_patch = sample["test_patch"]
     repo = sample["repo"]
     create_playground(repo, sample["base_commit"])
     directives = get_test_directives(repo, ref_patch)
-    file_path, test_name = parse_test_command(directives[0])
-    ref_func = gold_func = extract_test_source(file_path, test_name)
+    file_path, test_name = parse_test_command("pytest astropy/modeling/tests/test_separable.py::test_custom_model_separable")
+    ref_func = extract_test_source(file_path, test_name)
 
-    model = AutoModel.from_pretrained("swebench/harness/models/atcoder/semantic_data/python/with_score/codebert_0.2-0.2/checkpoint-best-eval_rank_gap/pytorch_model.bin")
+    gold_path, gold_name = parse_test_command("pytest astropy/io/ascii/tests/test_rst.py::test_read_normal")
+    # gold_func = extract_test_source(gold_path, gold_name)
+    gold_func = "def function():\nreturn None"
 
-    ref_vector = get_vector()
+    model = CodeBERTBasedModel()
+    load_model(model, "/Users/ethansin/Capstone/SWE-bench/swebench/harness/models/atcoder/semantic_data/python/with_score/codebert_0.2-0.2/checkpoint-best-eval_rank_gap")
+    tokenizer = AutoTokenizer.from_pretrained("microsoft/codebert-base")
 
+    v = get_vector(None, tokenizer=tokenizer, model=model, texts=[ref_func, gold_func])
+
+    scores = calculate_scores(v[0], [v[1]])
+
+    print(scores)
 
 if __name__ == "__main__":
     test()
