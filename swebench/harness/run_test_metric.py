@@ -306,11 +306,8 @@ def run_test_smells(test_patch: str) -> float:
 
     
 def run_similarity_score(test_patch: str, reference_patch: str) -> float:
-    # Generate a similarity ratio between test patch and reference patch.
-    similarity_ratio = difflib.SequenceMatcher(None, test_patch, reference_patch).ratio()
 
-    # Adjust weight
-    weighted_similarity_score = similarity_ratio * 1.0
+    weighted_similarity_score = (calculate_crystalbleu(test_patch, reference_patch) * 0.5) + 0.5
     return weighted_similarity_score
 
 ## Compares a test patch to a reference patch using CrystalBLEU, applying the similarity score as a weighting factor.
