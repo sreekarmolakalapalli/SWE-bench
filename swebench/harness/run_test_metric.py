@@ -257,14 +257,26 @@ def run_instance(
         score = 0
 
     smell_weighted_score = run_test_smells(pred_patch) * score
-    similarity_weighted_score = run_similarity_score(pred_patch) * score
+    ngram_weighted_score = run_similarity_score(pred_patch) * score
+    neural_net_score = None
+
+    scores = {
+        "base": score,
+        "weighted_n-gram": None,
+        "weighted_neural-net": None,
+    }
+
+    with open(log_dir / "results.json", "w") as f:
+        json.dump(scores, f, indent=4)
+
+    print(f"scores written to {log_dir}/results.json")
 
     cleanup_container(client, container, dummy_logger)
     if rm_image:
         remove_image(client, test_spec.instance_image_key, dummy_logger)
     close_logger(dummy_logger)
-    return (smell_weighted_score, similarity_weighted_score, score)
 
+    print(f"{instance_id} container removed")
 
 #def run_test_smells(patch) -> float:
 #  return 0.5
