@@ -282,8 +282,6 @@ def run_instance(
 
     print(f"{instance_id} container removed")
 
-#def run_test_smells(patch) -> float:
-#  return 0.5
 def run_test_smells(test_patch: str) -> float:
     # Starting with a perfect score of 1.0.
     smell_score = 1.0
