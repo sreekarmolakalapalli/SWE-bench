@@ -165,122 +165,124 @@ def run_instance(
     container = build_container(test_spec, client, run_id, dummy_logger, rm_image, force_rebuild)
     container.start()
 
-    pred_patch = test_spec.test_patch
-    ## COMMENTED OUT CODE BELOW IS FOR THE REAL RUN, ABOVE IS A PLACEHOLDER FOR DEVELOPMENT
-    # pred_patch = prediction['model_patch']
+    try:
+        pred_patch = test_spec.test_patch
+        ## COMMENTED OUT CODE BELOW IS FOR THE REAL RUN, ABOVE IS A PLACEHOLDER FOR DEVELOPMENT
+        # pred_patch = prediction['model_patch']
 
-    eval_script_list = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, pred_patch)
-    eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
+        eval_script_list = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, pred_patch)
+        eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
 
-    log_dir = Path(f"logs/run_metric/{instance_id}")
-    log_dir.mkdir(parents=True, exist_ok=True)
-    eval_file = Path(log_dir / "eval.sh")
-    eval_file.write_text(eval_script)
-    copy_to_container(container, eval_file, Path("/eval.sh"))
+        log_dir = Path(f"logs/run_metric/{instance_id}")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        eval_file = Path(log_dir / "eval.sh")
+        eval_file.write_text(eval_script)
+        copy_to_container(container, eval_file, Path("/eval.sh"))
 
-    def apply_patch(patch: str):
-        patch_file = Path("patch.diff")
-        patch_file.write_text(patch or "")
-        copy_to_container(container, patch_file, Path("/tmp/patch.diff"))
+        def apply_patch(patch: str):
+            patch_file = Path("patch.diff")
+            patch_file.write_text(patch or "")
+            copy_to_container(container, patch_file, Path("/tmp/patch.diff"))
 
-        val = container.exec_run(
-            "git apply --allow-empty -v /tmp/patch.diff",
-            workdir="/testbed",
-            user="root",
-        )
-        if val.exit_code != 0:
-            print(f"Failed to apply patch to container, trying again...")
-            
-            # try "patch --batch --fuzz=5 -p1 -i {patch_path}" to try again
             val = container.exec_run(
-                "patch --batch --fuzz=5 -p1 -i /tmp/patch.diff",
+                "git apply --allow-empty -v /tmp/patch.diff",
                 workdir="/testbed",
                 user="root",
             )
             if val.exit_code != 0:
-                print(f"{APPLY_PATCH_FAIL}:\n{val.output.decode('utf-8')}")
-                raise EvaluationError(
-                    instance_id,
-                    f"{APPLY_PATCH_FAIL}:\n{val.output.decode('utf-8')}",
+                print(f"Failed to apply patch to container, trying again...")
+                
+                # try "patch --batch --fuzz=5 -p1 -i {patch_path}" to try again
+                val = container.exec_run(
+                    "patch --batch --fuzz=5 -p1 -i /tmp/patch.diff",
+                    workdir="/testbed",
+                    user="root",
                 )
+                if val.exit_code != 0:
+                    print(f"{APPLY_PATCH_FAIL}:\n{val.output.decode('utf-8')}")
+                    raise EvaluationError(
+                        instance_id,
+                        f"{APPLY_PATCH_FAIL}:\n{val.output.decode('utf-8')}",
+                    )
+                else:
+                    print(f"{APPLY_PATCH_PASS}:\n{val.output.decode('utf-8')}")
             else:
                 print(f"{APPLY_PATCH_PASS}:\n{val.output.decode('utf-8')}")
+
+        apply_patch(pred_patch)
+        result1, timed_out1, total_runtime1 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
+        result1_output_path = log_dir / "result_output1.txt"
+        with open(result1_output_path, "w") as f:
+            f.write(result1)
+            if timed_out1:
+                f.write(f"\n\nTimeout error: {timeout} seconds exceeded.")
+                raise EvaluationError(
+                    instance_id,
+                    f"Test timed out after {timeout} seconds.",
+                )
+        # result1 = container.exec_run(pred_cmd, workdir="/testbed", user="root")
+        eval_sm1, _ = get_logs_eval(result1_output_path)
+
+        f2p_success_1 = []
+        f2p_failure_1 = []
+
+        for test_case in test_spec.FAIL_TO_PASS:
+            if test_passed(test_case, eval_sm1):
+                # Assume silent success for now (test case not in eval_sm)
+                f2p_success_1.append(test_case)
+            elif test_failed(test_case, eval_sm1):
+                f2p_failure_1.append(test_case)
+
+        apply_patch(test_spec.gold_patch)
+        result2, timed_out2, total_runtime2 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
+        # result2 = container.exec_run(pred_cmd, workdir="/testbed", user="root")
+        
+        result2_output_path = log_dir / "result_output2.txt"
+        with open(result2_output_path, "w") as f:
+            f.write(result2)
+            if timed_out2:
+                f.write(f"\n\nTimeout error: {timeout} seconds exceeded.")
+                raise EvaluationError(
+                    instance_id,
+                    f"Test timed out after {timeout} seconds.",
+                )
+
+        eval_sm2, _ = get_logs_eval(result2_output_path)
+        
+        f2p_success_2 = []
+        f2p_failure_2 = []
+        for test_case in test_spec.FAIL_TO_PASS:
+            if test_passed(test_case, eval_sm2):
+                # Assume silent success for now (test case not in eval_sm)
+                f2p_success_2.append(test_case)
+            elif test_failed(test_case, eval_sm2):
+                f2p_failure_2.append(test_case)
+
+        if f2p_failure_1 and f2p_success_2:
+            score = 1
         else:
-            print(f"{APPLY_PATCH_PASS}:\n{val.output.decode('utf-8')}")
+            score = 0
 
-    apply_patch(pred_patch)
-    result1, timed_out1, total_runtime1 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
-    result1_output_path = log_dir / "result_output1.txt"
-    with open(result1_output_path, "w") as f:
-        f.write(result1)
-        if timed_out1:
-            f.write(f"\n\nTimeout error: {timeout} seconds exceeded.")
-            raise EvaluationError(
-                instance_id,
-                f"Test timed out after {timeout} seconds.",
-            )
-    # result1 = container.exec_run(pred_cmd, workdir="/testbed", user="root")
-    eval_sm1, _ = get_logs_eval(result1_output_path)
+        smell_weighted_score = run_test_smells(pred_patch) * score
+        ngram_weighted_score = run_similarity_score(pred_patch) * score
+        neural_net_score = None
 
-    f2p_success_1 = []
-    f2p_failure_1 = []
-    for test_case in test_spec.FAIL_TO_PASS:
-        if test_passed(test_case, eval_sm1):
-            # Assume silent success for now (test case not in eval_sm)
-            f2p_success_1.append(test_case)
-        elif test_failed(test_case, eval_sm1):
-            f2p_failure_1.append(test_case)
+        scores = {
+            "base": score,
+            "weighted_n-gram": None,
+            "weighted_neural-net": None,
+        }
 
-    apply_patch(test_spec.gold_patch)
-    result2, timed_out2, total_runtime2 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
-    # result2 = container.exec_run(pred_cmd, workdir="/testbed", user="root")
-    result2_output_path = log_dir / "result_output2.txt"
-    with open(result2_output_path, "w") as f:
-        f.write(result2)
-        if timed_out2:
-            f.write(f"\n\nTimeout error: {timeout} seconds exceeded.")
-            raise EvaluationError(
-                instance_id,
-                f"Test timed out after {timeout} seconds.",
-            )
+        with open(log_dir / "results.json", "w") as f:
+            json.dump(scores, f, indent=4)
 
-    eval_sm2, _ = get_logs_eval(result2_output_path)
-    
-    f2p_success_2 = []
-    f2p_failure_2 = []
-    for test_case in test_spec.FAIL_TO_PASS:
-        if test_passed(test_case, eval_sm2):
-            # Assume silent success for now (test case not in eval_sm)
-            f2p_success_2.append(test_case)
-        elif test_failed(test_case, eval_sm2):
-            f2p_failure_2.append(test_case)
-
-    if f2p_failure_1 and f2p_success_2:
-        score = 1
-    else:
-        score = 0
-
-    smell_weighted_score = run_test_smells(pred_patch) * score
-    ngram_weighted_score = run_similarity_score(pred_patch) * score
-    neural_net_score = None
-
-    scores = {
-        "base": score,
-        "weighted_n-gram": None,
-        "weighted_neural-net": None,
-    }
-
-    with open(log_dir / "results.json", "w") as f:
-        json.dump(scores, f, indent=4)
-
-    print(f"scores written to {log_dir}/results.json")
-
-    cleanup_container(client, container, dummy_logger)
-    if rm_image:
-        remove_image(client, test_spec.instance_image_key, dummy_logger)
-    close_logger(dummy_logger)
-
-    print(f"{instance_id} container removed")
+        print(f"scores written to {log_dir}/results.json")
+    finally:
+        cleanup_container(client, container, dummy_logger)
+        if rm_image:
+            remove_image(client, test_spec.instance_image_key, dummy_logger)
+        close_logger(dummy_logger)
+        print(f"{instance_id} container removed")
 
 def run_test_smells(test_patch: str) -> float:
     # Starting with a perfect score of 1.0.
