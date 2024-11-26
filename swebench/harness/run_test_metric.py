@@ -594,6 +594,13 @@ def main(
     resource.setrlimit(resource.RLIMIT_NOFILE, (open_file_limit, open_file_limit))
     client = docker.from_env()
 
+<<<<<<< HEAD
+    # Load the precomputed trivial n-grams from a JSON file #DOUBT 
+    trivial_ngrams_file = "trivial_ngrams.json"  # Path to precomputed trivial n-grams JSON. which is created in generate_trivial_ngrams.
+    trivial_ngrams = load_trivial_ngrams(trivial_ngrams_file)
+
+=======
+>>>>>>> parent of 68ac0ff (added generate_trivial_ngrams.py and made changes in run_test_metric.)
     # load predictions as map of instance_id to prediction
     if predictions_path == 'gold':
         print("Using gold predictions - ignoring predictions_path")
