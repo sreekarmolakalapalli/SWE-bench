@@ -167,7 +167,8 @@ def run_instance(
     eval_script_list, test_command = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, test_patch)
     eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
 
-    log_dir = Path(f"logs/{run_id}/mutation_tests/{instance_id}")
+    model_name_or_path = prediction.get("model_name_or_path", "None").replace("/", "__")
+    log_dir = RUN_EVALUATION_LOG_DIR / run_id / model_name_or_path / instance_id
     log_dir.mkdir(parents=True, exist_ok=True)
     eval_file = Path(log_dir / "eval.sh")
     eval_file.write_text(eval_script)

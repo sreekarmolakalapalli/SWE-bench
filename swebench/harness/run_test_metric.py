@@ -16,7 +16,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from tqdm import tqdm
 
-from crystalbleu import CrystalBLEU
 from nltk.translate.bleu_score import sentence_bleu
 from collections import Counter
 from nltk.util import ngrams
@@ -48,6 +47,12 @@ from swebench.harness.docker_build import (
     build_env_images,
     close_logger,
     setup_logger,
+)
+from swebench.harness.reinforest_utils import (
+    parse_test_command,
+    extract_test_source,
+    normalize_lists,
+    run_neural_net_scores,
 )
 from swebench.harness.grading import get_logs_eval, test_passed, test_failed
 from swebench.harness.test_spec import make_test_spec, TestSpec
@@ -100,15 +105,8 @@ def get_test_directives(repo: str, test_patch: str) -> list:
 
 def make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, test_patch):
     """
-    Applies the test patch and runs the tests.
+    Runs the tests.
     """
-    HEREDOC_DELIMITER = "EOF_114329324912"
-    test_files = re.findall(DIFF_MODIFIED_FILE_REGEX, test_patch)
-    # Reset test files to the state they should be in before the patch.
-    reset_tests_command = f"git checkout {base_commit} {' '.join(test_files)}"
-    apply_test_patch_command = (
-        f"git apply -v - <<'{HEREDOC_DELIMITER}'\n{test_patch}\n{HEREDOC_DELIMITER}"
-    )
     test_command = " ".join(
         [
             MAP_REPO_VERSION_TO_SPECS[repo][version]["test_cmd"],
@@ -135,10 +133,7 @@ def make_eval_script_list(repo, version, specs, env_name, repo_directory, base_c
     if "install" in specs:
         eval_commands.append(specs["install"])
     eval_commands += [
-        reset_tests_command,
-        apply_test_patch_command,
-        test_command,
-        reset_tests_command,  # Revert tests after done, leave the repo in the same state as before
+        test_command
     ]
     return eval_commands
 
@@ -172,8 +167,8 @@ def run_instance(
 
         eval_script_list = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, pred_patch)
         eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
-
-        log_dir = Path(f"logs/run_metric/{instance_id}")
+        model_name_or_path = prediction.get("model_name_or_path", "None").replace("/", "__")
+        log_dir = RUN_EVALUATION_LOG_DIR / run_id / model_name_or_path / instance_id
         log_dir.mkdir(parents=True, exist_ok=True)
         eval_file = Path(log_dir / "eval.sh")
         eval_file.write_text(eval_script)
@@ -208,6 +203,11 @@ def run_instance(
                     print(f"{APPLY_PATCH_PASS}:\n{val.output.decode('utf-8')}")
             else:
                 print(f"{APPLY_PATCH_PASS}:\n{val.output.decode('utf-8')}")
+            val = container.exec_run(
+                    'git add .&&git commit -m "add changes"',
+                    workdir="/testbed",
+                    user="root",
+                )
 
         apply_patch(pred_patch)
         result1, timed_out1, total_runtime1 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
@@ -236,7 +236,7 @@ def run_instance(
         apply_patch(test_spec.gold_patch)
         result2, timed_out2, total_runtime2 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
         # result2 = container.exec_run(pred_cmd, workdir="/testbed", user="root")
-        
+
         result2_output_path = log_dir / "result_output2.txt"
         with open(result2_output_path, "w") as f:
             f.write(result2)
@@ -263,14 +263,24 @@ def run_instance(
         else:
             score = 0
 
-        smell_weighted_score = run_test_smells(pred_patch) * score
-        ngram_weighted_score = run_similarity_score(pred_patch) * score
-        neural_net_score = None
+        # test_commands = [*get_test_directives(repo, pred_patch)]
+
+        # test_command_pairs = normalize_lists(test_commands, test_spec.FAIL_TO_PASS)
+
+        # for submitted_test_case, gold_test_case in test_command_pairs:
+        #     test_loc, test_name = parse_test_command(test_case)
+        #     submitted_test = container.exec_run(f"cat {test_loc}", stdout=True, stderr=True)
+        #     submitted_test = submitted_test.output.decode('utf-8')
+        #     test_function = extract_test_source(test_name=test_name, file_contents=submitted_test)
+
+        # smell_weighted_score = run_test_smells(pred_patch) * score
+        # ngram_weighted_score = run_similarity_score(pred_patch) * score
+        neural_net_score = run_neural_net_scores(pred_patch, test_spec.test_patch)
 
         scores = {
             "base": score,
             "weighted_n-gram": None,
-            "weighted_neural-net": None,
+            "weighted_neural-net": 0.5 + (0.5 * neural_net_score) if score == 1 else 0,
         }
 
         with open(log_dir / "results.json", "w") as f:
@@ -315,23 +325,23 @@ def run_similarity_score(test_patch: str, reference_patch: str) -> float:
     return weighted_similarity_score
 
 ## Compares a test patch to a reference patch using CrystalBLEU, applying the similarity score as a weighting factor.
-def weighted_similarity_score(test_patch: str, gold_patch: str, base_score: float = 1.0) -> dict:
-    # Initialize CrystalBLEU
-    crystal_bleu = CrystalBLEU()
+# def weighted_similarity_score(test_patch: str, gold_patch: str, base_score: float = 1.0) -> dict:
+#     # Initialize CrystalBLEU
+#     crystal_bleu = CrystalBLEU()
     
-    # Calculate similarity ratio between test and reference patches
-    similarity_ratio_crystalbleu = crystal_bleu.get_similarity(test_patch, gold_patch)
-    weighted_crystalbleu_score = base_score * similarity_ratio_crystalbleu
+#     # Calculate similarity ratio between test and reference patches
+#     similarity_ratio_crystalbleu = crystal_bleu.get_similarity(test_patch, gold_patch)
+#     weighted_crystalbleu_score = base_score * similarity_ratio_crystalbleu
 
-    # Reinforest metrics 
+#     # Reinforest metrics 
 
-    # Compile scores in a dictionary
-    scores = {
-        "CrystalBLEU_weighted_score": weighted_crystalbleu_score,
-        # "REINFOREST_weighted_score": weighted_reinforest_score,
-    }
+#     # Compile scores in a dictionary
+#     scores = {
+#         "CrystalBLEU_weighted_score": weighted_crystalbleu_score,
+#         # "REINFOREST_weighted_score": weighted_reinforest_score,
+#     }
 
-    return scores
+#     return scores
 
 def run_instances(
         predictions: dict,
@@ -408,7 +418,8 @@ def get_dataset_from_preds(
         instance_ids: list,
         predictions: dict,
         run_id: str,
-        exclude_completed: bool = True
+        exclude_completed: bool = True,
+        log_to_check: str = "report.json",
     ):
     """
     Return only instances that have predictions and are in the dataset.
@@ -449,7 +460,7 @@ def get_dataset_from_preds(
             / run_id
             / prediction["model_name_or_path"].replace("/", "__")
             / prediction[KEY_INSTANCE_ID]
-            / "report.json"
+            / log_to_check
         )
         if report_file.exists():
             completed_ids.add(instance[KEY_INSTANCE_ID])

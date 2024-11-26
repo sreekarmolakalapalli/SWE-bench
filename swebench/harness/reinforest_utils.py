@@ -11,7 +11,6 @@ from typing import Optional, Union, List
 from torch import nn
 from transformers import AutoModel, PreTrainedTokenizer, BertModel, AutoTokenizer
 from swebench.harness.utils import load_swebench_dataset
-from swebench.harness.run_test_metric import get_test_directives
 
 class CrossMatchLoss(nn.Module):
     def __init__(
@@ -264,11 +263,23 @@ def parse_test_command(command):
 
     return file_path, test_name
 
-
-def extract_test_source(filepath, test_name):
-    with open(f"{filepath}", 'r') as file:
-        lines = file.readlines()
+def normalize_lists(list1, list2):
+    min_length = min(len(list1), len(list2))
     
+    normalized_list1 = list1[:min_length]
+    normalized_list2 = list2[:min_length]
+
+    zipped_list = list(zip(normalized_list1, normalized_list2))
+    
+    return zipped_list
+
+
+def extract_test_source(test_name, filepath:str=None, file_contents:str=None):
+    if filepath:
+        with open(f"{filepath}", 'r') as file:
+            lines = file.readlines()
+    if file_contents:
+        lines = file_contents.splitlines()
     test_code = []
     in_test = False
     
@@ -316,29 +327,47 @@ def load_model(model, ckpt_under_check, dont_load=False):
         with open(ckpt_file, 'rb') as fp:
             model.load_state_dict(torch.load(fp, map_location="mps"))
 
-def test():
-    dataset = load_swebench_dataset(instance_ids=["astropy__astropy-12907", "astropy__astropy-14182"])
-    sample = dataset[0]
-    ref_patch = sample["test_patch"]
-    repo = sample["repo"]
-    create_playground(repo, sample["base_commit"])
-    directives = get_test_directives(repo, ref_patch)
-    file_path, test_name = parse_test_command("pytest astropy/modeling/tests/test_separable.py::test_custom_model_separable")
-    ref_func = extract_test_source(file_path, test_name)
-
-    gold_path, gold_name = parse_test_command("pytest astropy/io/ascii/tests/test_rst.py::test_read_normal")
-    # gold_func = extract_test_source(gold_path, gold_name)
-    gold_func = "def function():\nreturn None"
-
+def run_neural_net_scores(submitted_test_patch, gold_test_patch):
     model = CodeBERTBasedModel()
     load_model(model, "/Users/ethansin/Capstone/SWE-bench/swebench/harness/models/atcoder/semantic_data/python/with_score/codebert_0.2-0.2/checkpoint-best-eval_rank_gap")
     tokenizer = AutoTokenizer.from_pretrained("microsoft/codebert-base")
 
-    v = get_vector(None, tokenizer=tokenizer, model=model, texts=[ref_func, gold_func])
+    v = get_vector(None, tokenizer=tokenizer, model=model, texts=[submitted_test_patch, gold_test_patch])    
+    
+    score = float(calculate_scores(v[0], [v[1]])[0])
 
-    scores = calculate_scores(v[0], [v[1]])
+    if score > 1:
+        score = 1
 
-    print(scores)
+    score = (0.01 - (1 - score)) / 0.01 if score > 0.99 else 0
+
+    return score
+
+
+# def test():
+#     dataset = load_swebench_dataset(instance_ids=["astropy__astropy-12907", "astropy__astropy-14182"])
+#     sample = dataset[0]
+#     ref_patch = sample["test_patch"]
+#     repo = sample["repo"]
+#     create_playground(repo, sample["base_commit"])
+#     directives = get_test_directives(repo, ref_patch)
+#     file_path, test_name = parse_test_command("pytest astropy/modeling/tests/test_separable.py::test_custom_model_separable")
+#     ref_func = extract_test_source(file_path, test_name)
+
+#     gold_path, gold_name = parse_test_command("pytest astropy/io/ascii/tests/test_rst.py::test_read_normal")
+#     # gold_func = extract_test_source(gold_path, gold_name)
+#     gold_func = "def function():\nreturn None"
+
+#     model = CodeBERTBasedModel()
+#     load_model(model, "/Users/ethansin/Capstone/SWE-bench/swebench/harness/models/atcoder/semantic_data/python/with_score/codebert_0.2-0.2/checkpoint-best-eval_rank_gap")
+#     tokenizer = AutoTokenizer.from_pretrained("microsoft/codebert-base")
+
+#     v = get_vector(None, tokenizer=tokenizer, model=model, texts=[ref_func, gold_func])
+
+#     scores = calculate_scores(v[0], [v[1]])
+
+#     print(scores)
 
 if __name__ == "__main__":
-    test()
+    # test()
+    pass
