@@ -53,6 +53,8 @@ from swebench.harness.reinforest_utils import (
     extract_test_source,
     normalize_lists,
     run_neural_net_scores,
+    extract_modified_functions,
+    get_modified_test_commands,
 )
 from swebench.harness.grading import get_logs_eval, test_passed, test_failed
 from swebench.harness.test_spec import make_test_spec, TestSpec
@@ -103,16 +105,31 @@ def get_test_directives(repo: str, test_patch: str) -> list:
 
     return directives
 
-def make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, test_patch):
+def make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, test_patch, test_commands=None):
     """
-    Runs the tests.
+    Applies the test patch and runs the tests.
     """
-    test_command = " ".join(
-        [
-            MAP_REPO_VERSION_TO_SPECS[repo][version]["test_cmd"],
-            *get_test_directives(repo, test_patch),
-        ]
+    HEREDOC_DELIMITER = "EOF_114329324912"
+    test_files = re.findall(DIFF_MODIFIED_FILE_REGEX, test_patch)
+    # Reset test files to the state they should be in before the patch.
+    reset_tests_command = f"git checkout {base_commit} {' '.join(test_files)}"
+    apply_test_patch_command = (
+        f"git apply -v - <<'{HEREDOC_DELIMITER}'\n{test_patch}\n{HEREDOC_DELIMITER}"
     )
+    if test_commands:
+        test_command = " ".join(
+            [
+                MAP_REPO_VERSION_TO_SPECS[repo][version]["test_cmd"],
+                *test_commands,
+            ]
+        )
+    else:
+        test_command = " ".join(
+            [
+                MAP_REPO_VERSION_TO_SPECS[repo][version]["test_cmd"],
+                *get_test_directives(repo, test_patch),
+            ]
+        )
     eval_commands = [
         "source /opt/miniconda3/bin/activate",
         f"conda activate {env_name}",
@@ -133,7 +150,9 @@ def make_eval_script_list(repo, version, specs, env_name, repo_directory, base_c
     if "install" in specs:
         eval_commands.append(specs["install"])
     eval_commands += [
-        test_command
+        reset_tests_command,
+        apply_test_patch_command,
+        test_command,
     ]
     return eval_commands
 
@@ -160,21 +179,7 @@ def run_instance(
     container = build_container(test_spec, client, run_id, dummy_logger, rm_image, force_rebuild)
     container.start()
 
-    try:
-        pred_patch = test_spec.test_patch
-        ## COMMENTED OUT CODE BELOW IS FOR THE REAL RUN, ABOVE IS A PLACEHOLDER FOR DEVELOPMENT
-        # pred_patch = prediction['model_patch']
-
-        eval_script_list = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, pred_patch)
-        eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
-        model_name_or_path = prediction.get("model_name_or_path", "None").replace("/", "__")
-        log_dir = RUN_EVALUATION_LOG_DIR / run_id / model_name_or_path / instance_id
-        log_dir.mkdir(parents=True, exist_ok=True)
-        eval_file = Path(log_dir / "eval.sh")
-        eval_file.write_text(eval_script)
-        copy_to_container(container, eval_file, Path("/eval.sh"))
-
-        def apply_patch(patch: str):
+    def apply_patch(patch: str):
             patch_file = Path("patch.diff")
             patch_file.write_text(patch or "")
             copy_to_container(container, patch_file, Path("/tmp/patch.diff"))
@@ -208,8 +213,34 @@ def run_instance(
                     workdir="/testbed",
                     user="root",
                 )
+            
+    try:
+        pred_patch = test_spec.test_patch
+        ## COMMENTED OUT CODE BELOW IS FOR THE REAL RUN, ABOVE IS A PLACEHOLDER FOR DEVELOPMENT
+        # pred_patch = prediction['model_patch']
 
         apply_patch(pred_patch)
+        fail_to_pass = []
+        framework = "pytest" if specs["test_cmd"].split(" ")[0] == "pytest" else "unittest"
+
+        test_commands = [*get_test_directives(repo, pred_patch)]
+        for test_case in test_commands:
+            test_filepath, _ = parse_test_command(test_case)
+            test_file = container.exec_run(f"cat {test_filepath}")
+            test_file = test_file.output.decode('utf-8')
+            test_func_names = get_modified_test_commands(pred_patch, test_file, framework)
+            for test_func_name in test_func_names:
+                fail_to_pass.append(f"{test_filepath}::{test_func_name}")
+
+        eval_script_list = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, pred_patch, fail_to_pass)
+        eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
+        model_name_or_path = prediction.get("model_name_or_path", "None").replace("/", "__")
+        log_dir = RUN_EVALUATION_LOG_DIR / run_id / model_name_or_path / instance_id
+        log_dir.mkdir(parents=True, exist_ok=True)
+        eval_file = Path(log_dir / "eval.sh")
+        eval_file.write_text(eval_script)
+        copy_to_container(container, eval_file, Path("/eval.sh"))
+
         result1, timed_out1, total_runtime1 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
         result1_output_path = log_dir / "result_output1.txt"
         with open(result1_output_path, "w") as f:
@@ -220,22 +251,20 @@ def run_instance(
                     instance_id,
                     f"Test timed out after {timeout} seconds.",
                 )
-        # result1 = container.exec_run(pred_cmd, workdir="/testbed", user="root")
         eval_sm1, _ = get_logs_eval(result1_output_path)
 
         f2p_success_1 = []
         f2p_failure_1 = []
 
-        for test_case in test_spec.FAIL_TO_PASS:
+        for test_case in fail_to_pass:
             if test_passed(test_case, eval_sm1):
-                # Assume silent success for now (test case not in eval_sm)
                 f2p_success_1.append(test_case)
             elif test_failed(test_case, eval_sm1):
                 f2p_failure_1.append(test_case)
 
         apply_patch(test_spec.gold_patch)
         result2, timed_out2, total_runtime2 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
-        # result2 = container.exec_run(pred_cmd, workdir="/testbed", user="root")
+
 
         result2_output_path = log_dir / "result_output2.txt"
         with open(result2_output_path, "w") as f:
@@ -251,7 +280,7 @@ def run_instance(
         
         f2p_success_2 = []
         f2p_failure_2 = []
-        for test_case in test_spec.FAIL_TO_PASS:
+        for test_case in fail_to_pass:
             if test_passed(test_case, eval_sm2):
                 # Assume silent success for now (test case not in eval_sm)
                 f2p_success_2.append(test_case)
@@ -263,16 +292,6 @@ def run_instance(
         else:
             score = 0
 
-        # test_commands = [*get_test_directives(repo, pred_patch)]
-
-        # test_command_pairs = normalize_lists(test_commands, test_spec.FAIL_TO_PASS)
-
-        # for submitted_test_case, gold_test_case in test_command_pairs:
-        #     test_loc, test_name = parse_test_command(test_case)
-        #     submitted_test = container.exec_run(f"cat {test_loc}", stdout=True, stderr=True)
-        #     submitted_test = submitted_test.output.decode('utf-8')
-        #     test_function = extract_test_source(test_name=test_name, file_contents=submitted_test)
-
         # smell_weighted_score = run_test_smells(pred_patch) * score
         # ngram_weighted_score = run_similarity_score(pred_patch) * score
         neural_net_score = run_neural_net_scores(pred_patch, test_spec.test_patch)
@@ -283,10 +302,12 @@ def run_instance(
             "weighted_neural-net": 0.5 + (0.5 * neural_net_score) if score == 1 else 0,
         }
 
-        with open(log_dir / "results.json", "w") as f:
+        with open(log_dir / "report.json", "w") as f:
             json.dump(scores, f, indent=4)
 
         print(f"scores written to {log_dir}/results.json")
+    except RuntimeError as e:
+        print('blah blah blah')
     finally:
         cleanup_container(client, container, dummy_logger)
         if rm_image:

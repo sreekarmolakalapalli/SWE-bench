@@ -343,6 +343,106 @@ def run_neural_net_scores(submitted_test_patch, gold_test_patch):
 
     return score
 
+def extract_modified_functions(git_diff: str, patched_file_contents: str):
+    """
+    Extracts the names of functions modified in a file from a git diff and the file contents.
+    
+    Args:
+        git_diff (str): The `git diff` output as a string.
+        patched_file_contents (str): The full contents of the patched file.
+        
+    Returns:
+        list: A list of modified function names.
+    """
+    modified_lines = []
+    for line in git_diff.splitlines():
+        match = re.match(r'^@@ -\d+,\d+ \+(\d+),\d+ @@', line)
+        if match:
+            start_line = int(match.group(1))
+            modified_lines.append(start_line)
+    
+    function_regex = re.compile(r'^\s*(def|void|int|float|double|char|class|function)\s+(\w+)', re.MULTILINE)
+    lines = patched_file_contents.splitlines()
+    function_map = {}
+    current_function = None
+
+    for i, line in enumerate(lines):
+        match = function_regex.match(line)
+        if match:
+            current_function = match.group(2)
+        function_map[i + 1] = current_function
+    
+    modified_functions = set()
+    for line_num in modified_lines:
+        if line_num in function_map and function_map[line_num]:
+            modified_functions.add(function_map[line_num])
+    
+    return list(modified_functions)
+
+import re
+
+def get_modified_test_commands(git_diff: str, file_contents: str, test_framework: str = "pytest") -> str:
+    """
+    Generate the command to run modified tests in a Python test suite, handling test functions and methods inside classes.
+    
+    Parameters:
+        git_diff (str): The git diff output as a string.
+        file_contents (str): The entire content of the modified file.
+        test_framework (str): The test framework, "pytest" or "unittest". Defaults to "pytest".
+        
+    Returns:
+        str: The command to run the modified test.
+    """
+    # Step 1: Extract modified lines from the git diff
+    diff_lines = []
+    for line in git_diff.splitlines():
+        if line.startswith('@@'):
+            match = re.search(r'\+(\d+)', line)
+            if match:
+                diff_lines.append(int(match.group(1)))
+    
+    # Step 2: Parse the file content and find test functions/methods
+    test_name_pattern = re.compile(r"^(def|class)\s+(\w+)")
+    class_name = None
+    modified_tests = set()
+    
+    lines = file_contents.splitlines()
+    for line_num in diff_lines:
+        for i in range(line_num - 1, -1, -1):
+            line = lines[i].strip()
+            match = test_name_pattern.match(line)
+            
+            if match:
+                kind, name = match.groups()
+                if kind == "class":
+                    # Update the class name if we're inside a class
+                    class_name = name
+                elif kind == "def":
+                    # If a test method is found, add it
+                    if class_name:
+                        # For unittest, it's class.method
+                        modified_tests.add(f"{class_name}.{name}")
+                    else:
+                        # For pytest or standalone test functions
+                        modified_tests.add(name)
+                break
+    
+    # Step 3: Construct the command based on the test framework
+    if not modified_tests:
+        return "No modified tests detected."
+    
+    if test_framework == "pytest":
+        # For pytest, construct the command with the file and test names
+        test_commands = [f"{file_contents.splitlines()[0]}::{test}" for test in modified_tests]
+        return test_commands
+    elif test_framework == "unittest":
+        # For unittest, construct the module path and specific tests
+        module_name = file_contents.splitlines()[0].replace("/", ".").replace(".py", "")
+        test_commands = [f"{module_name}.{test}" for test in modified_tests]
+        return test_commands
+    else:
+        raise ValueError(f"Unsupported test framework: {test_framework}")
+
 
 # def test():
 #     dataset = load_swebench_dataset(instance_ids=["astropy__astropy-12907", "astropy__astropy-14182"])
