@@ -8,6 +8,7 @@ import logging
 import re
 import os
 import subprocess
+import pickle
 
 import difflib
 
@@ -16,10 +17,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from tqdm import tqdm
 
-from nltk.translate.bleu_score import sentence_bleu
 from collections import Counter
 from nltk.util import ngrams
-from crystalbleu import corpus_bleu
+from crystalbleu import sentence_bleu
 
 # from crystalbleu import sentence_bleu
 
@@ -541,38 +541,21 @@ def tokenize_code(code):
     tokens = re.findall(token_pattern, code)
     return tokens
 
-def load_trivially_shared_ngrams(corpus, k=500, n_range=(1, 4)):
-    all_ngrams = []
-    for n in range(n_range[0], n_range[1] + 1):
-        all_ngrams.extend(ngrams(corpus, n))
-    frequencies = Counter(all_ngrams)
-    return dict(frequencies.most_common(k))
 
-def filter_trivially_shared_ngrams(tokens, trivially_shared_ngrams):
-    filtered_tokens = []
-    for n in range(1, 5):  # Matching the range used for n-gram extraction
-        token_ngrams = ngrams(tokens, n)
-        for token_ngram in token_ngrams:
-            if token_ngram not in trivially_shared_ngrams:
-                filtered_tokens.extend(token_ngram)
-    return filtered_tokens
 
 
 # Calculates the CrystalBLEU score for a generated test (model_patch) against a reference test (gold_patch) with trivial filter 
 def calculate_crystalbleu(model_patch, gold_patch, tokenized_corpus, k=500):
+    trivial_ngrams_file = "trivial_ngrams.json"  # Path to precomputed trivial n-grams JSON. which is created in generate_trivial_ngrams.
+    with open(trivial_ngrams_file, "rb") as file :
+        trivial_ngrams = pickle.load(trivial_ngrams_file)
+
     # sentence_bleu expects a tokenized reference and candidate
     model_patch_tokens = tokenize_code(model_patch)
     gold_patch_tokens = tokenize_code(gold_patch)
-
-    # Extract trivially shared n-grams
-    trivially_shared_ngrams = load_trivially_shared_ngrams(tokenized_corpus, k)
-
-    # Filter trivially shared n-grams
-    filtered_model_tokens = filter_trivially_shared_ngrams(model_patch_tokens, trivially_shared_ngrams)
-    filtered_gold_tokens = filter_trivially_shared_ngrams(gold_patch_tokens, trivially_shared_ngrams)
     
     # Calculate BLEU score for the model's patch against the gold patch
-    score = sentence_bleu([filtered_gold_tokens], filtered_model_tokens)
+    score = sentence_bleu([filtered_gold_tokens], filtered_model_tokens, ignoring = trivial_ngrams)
     return score
 
 
@@ -615,11 +598,7 @@ def main(
     resource.setrlimit(resource.RLIMIT_NOFILE, (open_file_limit, open_file_limit))
     client = docker.from_env()
 
-    # Load the precomputed trivial n-grams from a JSON file #DOUBT 
-    trivial_ngrams_file = "trivial_ngrams.json"  # Path to precomputed trivial n-grams JSON. which is created in generate_trivial_ngrams.
-    trivial_ngrams = load_trivial_ngrams(trivial_ngrams_file)
-
-    # load predictions as map of instance_id to prediction
+# load predictions as map of instance_id to prediction
     if predictions_path == 'gold':
         print("Using gold predictions - ignoring predictions_path")
         predictions = get_gold_predictions(dataset_name, split)
