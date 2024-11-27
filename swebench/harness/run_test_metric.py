@@ -220,19 +220,19 @@ def run_instance(
         # pred_patch = prediction['model_patch']
 
         apply_patch(pred_patch)
-        fail_to_pass = []
-        framework = "pytest" if specs["test_cmd"].split(" ")[0] == "pytest" else "unittest"
+        # fail_to_pass = []
+        # framework = "pytest" if specs["test_cmd"].split(" ")[0] == "pytest" else "unittest"
 
-        test_commands = [*get_test_directives(repo, pred_patch)]
-        for test_case in test_commands:
-            test_filepath, _ = parse_test_command(test_case)
-            test_file = container.exec_run(f"cat {test_filepath}")
-            test_file = test_file.output.decode('utf-8')
-            test_func_names = get_modified_test_commands(pred_patch, test_file, framework)
-            for test_func_name in test_func_names:
-                fail_to_pass.append(f"{test_filepath}::{test_func_name}")
+        # test_commands = [*get_test_directives(repo, pred_patch)]
+        # for test_case in test_commands:
+        #     test_filepath, _ = parse_test_command(test_case)
+        #     test_file = container.exec_run(f"cat {test_filepath}")
+        #     test_file = test_file.output.decode('utf-8')
+        #     test_func_names = get_modified_test_commands(pred_patch, test_file, framework)
+        #     for test_func_name in test_func_names:
+        #         fail_to_pass.append(f"{test_filepath}::{test_func_name}")
 
-        eval_script_list = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, pred_patch, fail_to_pass)
+        eval_script_list = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, pred_patch)
         eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
         model_name_or_path = prediction.get("model_name_or_path", "None").replace("/", "__")
         log_dir = RUN_EVALUATION_LOG_DIR / run_id / model_name_or_path / instance_id
@@ -256,7 +256,7 @@ def run_instance(
         f2p_success_1 = []
         f2p_failure_1 = []
 
-        for test_case in fail_to_pass:
+        for test_case in test_spec.FAIL_TO_PASS:
             if test_passed(test_case, eval_sm1):
                 f2p_success_1.append(test_case)
             elif test_failed(test_case, eval_sm1):
@@ -280,7 +280,7 @@ def run_instance(
         
         f2p_success_2 = []
         f2p_failure_2 = []
-        for test_case in fail_to_pass:
+        for test_case in test_spec.FAIL_TO_PASS:
             if test_passed(test_case, eval_sm2):
                 # Assume silent success for now (test case not in eval_sm)
                 f2p_success_2.append(test_case)
@@ -295,10 +295,11 @@ def run_instance(
         # smell_weighted_score = run_test_smells(pred_patch) * score
         # ngram_weighted_score = run_similarity_score(pred_patch) * score
         neural_net_score = run_neural_net_scores(pred_patch, test_spec.test_patch)
+        n_gram_score = calculate_crystalbleu(pred_patch, test_spec.test_patch)
 
         scores = {
             "base": score,
-            "weighted_n-gram": None,
+            "weighted_n-gram": 0.5 + (0.5 * n_gram_score) if score == 1 else 0,
             "weighted_neural-net": 0.5 + (0.5 * neural_net_score) if score == 1 else 0,
         }
 
@@ -338,31 +339,6 @@ def run_test_smells(test_patch: str) -> float:
         smell_score -= 0.2
     
     return max(smell_score, 0.5)
-
-    
-def run_similarity_score(test_patch: str, reference_patch: str) -> float:
-
-    weighted_similarity_score = (calculate_crystalbleu(test_patch, reference_patch) * 0.5) + 0.5
-    return weighted_similarity_score
-
-## Compares a test patch to a reference patch using CrystalBLEU, applying the similarity score as a weighting factor.
-# def weighted_similarity_score(test_patch: str, gold_patch: str, base_score: float = 1.0) -> dict:
-#     # Initialize CrystalBLEU
-#     crystal_bleu = CrystalBLEU()
-    
-#     # Calculate similarity ratio between test and reference patches
-#     similarity_ratio_crystalbleu = crystal_bleu.get_similarity(test_patch, gold_patch)
-#     weighted_crystalbleu_score = base_score * similarity_ratio_crystalbleu
-
-#     # Reinforest metrics 
-
-#     # Compile scores in a dictionary
-#     scores = {
-#         "CrystalBLEU_weighted_score": weighted_crystalbleu_score,
-#         # "REINFOREST_weighted_score": weighted_reinforest_score,
-#     }
-
-#     return scores
 
 def run_instances(
         predictions: dict,
@@ -510,72 +486,21 @@ def get_gold_predictions(dataset_name: str, split: str):
         } for datum in dataset
     ]
 
+def calculate_crystalbleu(model_patch, gold_patch):
+    trivial_ngrams_file = "trivial_ngrams.pkl"  
+    with open(trivial_ngrams_file, "rb") as file:
+        trivial_ngrams = pickle.load(file)
 
-# RQ3 - TESTING METRICS USING AGENTLESS GENERATED UNIT TESTS.
-# Load generated tests for evaluation.
-# currently uses hardcoded test data
-# I should modify in such a way that it can read from a JSON file when the generated tests are saved by generate_reproduction_tests.py.
-def load_generated_tests(): 
-    generated_tests = [
-        {
-            'instance_id': 'astropy__astropy-12907',
-            'model_patch': "diff --git a/astropy/modeling/separable.py b/astropy/modeling/separable.py\n--- a/astropy/modeling/separable.py\n+++ b/astropy/modeling/separable.py\n@@ -242,7 +242,7 @@ def _cstack(left, right):\n         cright = np.zeros((noutp, right.shape[1]))\n-        cright[-right.shape[0]:, -right.shape[1]:] = 1\n+        cright[-right.shape[0]:, -right.shape[1]:] = right\n \n     return np.hstack([cleft, cright])\n \n",
-            'model_name_or_path': 'gold'
-        },
-        # Add more instances
-    ]
-    return generated_tests
+    def tokenize_code(code):
+        token_pattern = r"[A-Za-z_][A-Za-z0-9_]*|[\{\}\[\]\(\)\.;,]|[+\-*/=%<>!]+"
+        tokens = re.findall(token_pattern, code)
+        return tokens
 
-# Read from JSON (not hardcoded):
-""" 
-def load_generated_tests(file_path='generated_tests.json'):
-    with open(file_path, 'r') as file:
-        generated_tests = json.load(file)
-    return generated_tests
-"""
-
-# We need to verify that this scoring logic works with your patches
-
-def tokenize_code(code):
-    token_pattern = r"[A-Za-z_][A-Za-z0-9_]*|[\{\}\[\]\(\)\.;,]|[+\-*/=%<>!]+"
-    tokens = re.findall(token_pattern, code)
-    return tokens
-
-
-
-
-# Calculates the CrystalBLEU score for a generated test (model_patch) against a reference test (gold_patch) with trivial filter 
-def calculate_crystalbleu(model_patch, gold_patch, tokenized_corpus, k=500):
-    trivial_ngrams_file = "trivial_ngrams.json"  # Path to precomputed trivial n-grams JSON. which is created in generate_trivial_ngrams.
-    with open(trivial_ngrams_file, "rb") as file :
-        trivial_ngrams = pickle.load(trivial_ngrams_file)
-
-    # sentence_bleu expects a tokenized reference and candidate
     model_patch_tokens = tokenize_code(model_patch)
     gold_patch_tokens = tokenize_code(gold_patch)
     
-    # Calculate BLEU score for the model's patch against the gold patch
-    score = sentence_bleu([filtered_gold_tokens], filtered_model_tokens, ignoring = trivial_ngrams)
+    score = sentence_bleu([model_patch_tokens], gold_patch_tokens, ignoring = trivial_ngrams)
     return score
-
-
-def evaluate_test(instance):
-    # Evaluate a single test instance.
-    instance_id = instance['instance_id']
-    model_patch = instance['model_patch']
-    model_name_or_path = instance['model_name_or_path']
-    
-    # Example of using CrystalBLEU to compare patches; replace with actual evaluation logic
-    gold_patch = "<gold standard test string here>"  # Substitute with actual gold standard test
-    similarity_score = calculate_crystalbleu(model_patch, gold_patch)
-
-    # Return results
-    return {
-        'instance_id': instance_id,
-        'similarity_score': similarity_score,
-        'model_name_or_path': model_name_or_path
-    }
-
 
 def main(
         dataset_name: str,
