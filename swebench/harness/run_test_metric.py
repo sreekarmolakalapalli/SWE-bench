@@ -50,11 +50,8 @@ from swebench.harness.docker_build import (
 )
 from swebench.harness.reinforest_utils import (
     parse_test_command,
-    extract_test_source,
-    normalize_lists,
     run_neural_net_scores,
-    extract_modified_functions,
-    get_modified_test_commands,
+    get_modified_or_added_functions_for_file,
 )
 from swebench.harness.grading import get_logs_eval, test_passed, test_failed
 from swebench.harness.test_spec import make_test_spec, TestSpec
@@ -220,17 +217,15 @@ def run_instance(
         # pred_patch = prediction['model_patch']
 
         apply_patch(pred_patch)
-        # fail_to_pass = []
-        # framework = "pytest" if specs["test_cmd"].split(" ")[0] == "pytest" else "unittest"
+        fail_to_pass = []
+        framework = "pytest" if specs["test_cmd"].split(" ")[0] == "pytest" else "unittest"
 
-        # test_commands = [*get_test_directives(repo, pred_patch)]
-        # for test_case in test_commands:
-        #     test_filepath, _ = parse_test_command(test_case)
-        #     test_file = container.exec_run(f"cat {test_filepath}")
-        #     test_file = test_file.output.decode('utf-8')
-        #     test_func_names = get_modified_test_commands(pred_patch, test_file, framework)
-        #     for test_func_name in test_func_names:
-        #         fail_to_pass.append(f"{test_filepath}::{test_func_name}")
+        test_commands = [*get_test_directives(repo, pred_patch)]
+        for test_case in test_commands:
+            test_filepath, _ = parse_test_command(test_case)
+            test_func_names = get_modified_or_added_functions_for_file(pred_patch, test_filepath)
+            for test_func_name in test_func_names:
+                fail_to_pass.append(f"{test_func_name}")
 
         eval_script_list = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, pred_patch)
         eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
@@ -256,7 +251,7 @@ def run_instance(
         f2p_success_1 = []
         f2p_failure_1 = []
 
-        for test_case in test_spec.FAIL_TO_PASS:
+        for test_case in fail_to_pass:
             if test_passed(test_case, eval_sm1):
                 f2p_success_1.append(test_case)
             elif test_failed(test_case, eval_sm1):
@@ -280,14 +275,14 @@ def run_instance(
         
         f2p_success_2 = []
         f2p_failure_2 = []
-        for test_case in test_spec.FAIL_TO_PASS:
+        for test_case in fail_to_pass:
             if test_passed(test_case, eval_sm2):
                 # Assume silent success for now (test case not in eval_sm)
                 f2p_success_2.append(test_case)
             elif test_failed(test_case, eval_sm2):
                 f2p_failure_2.append(test_case)
 
-        if f2p_failure_1 and f2p_success_2:
+        if f2p_failure_1 and f2p_success_2 and not f2p_success_1 and not f2p_failure_2:
             score = 1
         else:
             score = 0
