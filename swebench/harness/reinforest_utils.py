@@ -343,43 +343,40 @@ def run_neural_net_scores(submitted_test_patch, gold_test_patch):
 
     return score
 
-def extract_modified_functions(git_diff: str, patched_file_contents: str):
+def get_modified_or_added_functions_for_file(diff: str, file_name: str) -> list:
     """
-    Extracts the names of functions modified in a file from a git diff and the file contents.
-    
+    Extract the names of functions modified or added in a specific file within a Git diff.
+
     Args:
-        git_diff (str): The `git diff` output as a string.
-        patched_file_contents (str): The full contents of the patched file.
-        
+        diff (str): The Git diff as a string.
+        file_name (str): The name of the file to filter changes for.
+
     Returns:
-        list: A list of modified function names.
+        list: A list of function names modified or added in the specified file.
     """
-    modified_lines = []
-    for line in git_diff.splitlines():
-        match = re.match(r'^@@ -\d+,\d+ \+(\d+),\d+ @@', line)
-        if match:
-            start_line = int(match.group(1))
-            modified_lines.append(start_line)
-    
-    function_regex = re.compile(r'^\s*(def|void|int|float|double|char|class|function)\s+(\w+)', re.MULTILINE)
-    lines = patched_file_contents.splitlines()
-    function_map = {}
-    current_function = None
+    # Pattern to identify the start of changes for a file
+    file_header_pattern = re.compile(rf"^diff --git a/{re.escape(file_name)} b/{re.escape(file_name)}", re.MULTILINE)
+    function_pattern = re.compile(r"^\+.*\bdef\s+(\w+)\s*\(", re.MULTILINE)
+    modified_function_pattern = re.compile(r"@@.*?@@.*?(\w+)\s*\(", re.MULTILINE)
 
-    for i, line in enumerate(lines):
-        match = function_regex.match(line)
-        if match:
-            current_function = match.group(2)
-        function_map[i + 1] = current_function
+    # Split the diff into sections for each file
+    file_sections = file_header_pattern.split(diff)
     
-    modified_functions = set()
-    for line_num in modified_lines:
-        if line_num in function_map and function_map[line_num]:
-            modified_functions.add(function_map[line_num])
-    
-    return list(modified_functions)
+    # If the file is not in the diff, return an empty list
+    if len(file_sections) < 2:
+        return []
 
-import re
+    # Focus on the section corresponding to the specified file
+    file_diff = file_sections[1]
+
+    # Find function additions and modifications in the file diff
+    added_functions = function_pattern.findall(file_diff)
+    modified_functions = modified_function_pattern.findall(file_diff)
+
+    # Combine and deduplicate function names
+    return list(set(added_functions + modified_functions))
+
+
 
 def get_modified_test_commands(git_diff: str, file_contents: str, test_framework: str = "pytest") -> str:
     """
