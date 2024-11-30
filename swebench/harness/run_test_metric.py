@@ -102,7 +102,7 @@ def get_test_directives(repo: str, test_patch: str) -> list:
 
     return directives
 
-def make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, test_patch, test_commands=None):
+def make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, test_patch, test_command=None):
     """
     Applies the test patch and runs the tests.
     """
@@ -113,14 +113,7 @@ def make_eval_script_list(repo, version, specs, env_name, repo_directory, base_c
     apply_test_patch_command = (
         f"git apply -v - <<'{HEREDOC_DELIMITER}'\n{test_patch}\n{HEREDOC_DELIMITER}"
     )
-    if test_commands:
-        test_command = " ".join(
-            [
-                MAP_REPO_VERSION_TO_SPECS[repo][version]["test_cmd"],
-                *test_commands,
-            ]
-        )
-    else:
+    if not test_command:
         test_command = " ".join(
             [
                 MAP_REPO_VERSION_TO_SPECS[repo][version]["test_cmd"],
@@ -212,91 +205,141 @@ def run_instance(
                 )
             
     try:
-        pred_patch = test_spec.test_patch
-        ## COMMENTED OUT CODE BELOW IS FOR THE REAL RUN, ABOVE IS A PLACEHOLDER FOR DEVELOPMENT
-        # pred_patch = prediction['model_patch']
-
-        apply_patch(pred_patch)
-        fail_to_pass = []
-        framework = "pytest" if specs["test_cmd"].split(" ")[0] == "pytest" else "unittest"
-
-        test_commands = [*get_test_directives(repo, pred_patch)]
-        for test_case in test_commands:
-            test_filepath, _ = parse_test_command(test_case)
-            test_func_names = get_modified_or_added_functions_for_file(pred_patch, test_filepath)
-            for test_func_name in test_func_names:
-                fail_to_pass.append(f"{test_func_name}")
-
-        eval_script_list = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, pred_patch)
-        eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
         model_name_or_path = prediction.get("model_name_or_path", "None").replace("/", "__")
-        log_dir = RUN_EVALUATION_LOG_DIR / run_id / model_name_or_path / instance_id
-        log_dir.mkdir(parents=True, exist_ok=True)
-        eval_file = Path(log_dir / "eval.sh")
-        eval_file.write_text(eval_script)
-        copy_to_container(container, eval_file, Path("/eval.sh"))
+        # pred_patch = test_spec.test_patch
+        ## COMMENTED OUT CODE BELOW IS FOR THE REAL RUN, ABOVE IS A PLACEHOLDER FOR DEVELOPMENT
+        pred_patch = prediction['model_patch']
 
-        result1, timed_out1, total_runtime1 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
-        result1_output_path = log_dir / "result_output1.txt"
-        with open(result1_output_path, "w") as f:
-            f.write(result1)
-            if timed_out1:
-                f.write(f"\n\nTimeout error: {timeout} seconds exceeded.")
-                raise EvaluationError(
-                    instance_id,
-                    f"Test timed out after {timeout} seconds.",
-                )
-        eval_sm1, _ = get_logs_eval(result1_output_path)
+        if model_name_or_path != "agentless":
+            apply_patch(pred_patch)
+            fail_to_pass = []
 
-        f2p_success_1 = []
-        f2p_failure_1 = []
+            test_commands = [*get_test_directives(repo, pred_patch)]
+            for test_case in test_commands:
+                test_filepath, _ = parse_test_command(test_case)
+                test_func_names = get_modified_or_added_functions_for_file(pred_patch, test_filepath)
+                for test_func_name in test_func_names:
+                    fail_to_pass.append(f"{test_func_name}")
 
-        for test_case in fail_to_pass:
-            if test_passed(test_case, eval_sm1):
-                f2p_success_1.append(test_case)
-            elif test_failed(test_case, eval_sm1):
-                f2p_failure_1.append(test_case)
+            fail_to_pass = list(set(fail_to_pass))
 
-        apply_patch(test_spec.gold_patch)
-        result2, timed_out2, total_runtime2 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
+            eval_script_list = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, pred_patch)
+            eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
+            log_dir = RUN_EVALUATION_LOG_DIR / run_id / model_name_or_path / instance_id
+            log_dir.mkdir(parents=True, exist_ok=True)
+            eval_file = Path(log_dir / "eval.sh")
+            eval_file.write_text(eval_script)
+            copy_to_container(container, eval_file, Path("/eval.sh"))
+
+            result1, timed_out1, total_runtime1 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
+            result1_output_path = log_dir / "result_output1.txt"
+            with open(result1_output_path, "w") as f:
+                f.write(result1)
+                if timed_out1:
+                    f.write(f"\n\nTimeout error: {timeout} seconds exceeded.")
+                    raise EvaluationError(
+                        instance_id,
+                        f"Test timed out after {timeout} seconds.",
+                    )
+            eval_sm1, _ = get_logs_eval(result1_output_path)
+
+            f2p_success_1 = []
+            f2p_failure_1 = []
+
+            for test_case in fail_to_pass:
+                if test_passed(test_case, eval_sm1):
+                    f2p_success_1.append(test_case)
+                elif test_failed(test_case, eval_sm1):
+                    f2p_failure_1.append(test_case)
+
+            apply_patch(test_spec.gold_patch)
+            result2, timed_out2, total_runtime2 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
 
 
-        result2_output_path = log_dir / "result_output2.txt"
-        with open(result2_output_path, "w") as f:
-            f.write(result2)
-            if timed_out2:
-                f.write(f"\n\nTimeout error: {timeout} seconds exceeded.")
-                raise EvaluationError(
-                    instance_id,
-                    f"Test timed out after {timeout} seconds.",
-                )
+            result2_output_path = log_dir / "result_output2.txt"
+            with open(result2_output_path, "w") as f:
+                f.write(result2)
+                if timed_out2:
+                    f.write(f"\n\nTimeout error: {timeout} seconds exceeded.")
+                    raise EvaluationError(
+                        instance_id,
+                        f"Test timed out after {timeout} seconds.",
+                    )
 
-        eval_sm2, _ = get_logs_eval(result2_output_path)
-        
-        f2p_success_2 = []
-        f2p_failure_2 = []
-        for test_case in fail_to_pass:
-            if test_passed(test_case, eval_sm2):
-                # Assume silent success for now (test case not in eval_sm)
-                f2p_success_2.append(test_case)
-            elif test_failed(test_case, eval_sm2):
-                f2p_failure_2.append(test_case)
+            eval_sm2, _ = get_logs_eval(result2_output_path)
+            
+            f2p_success_2 = []
+            f2p_failure_2 = []
+            for test_case in fail_to_pass:
+                if test_passed(test_case, eval_sm2):
+                    f2p_success_2.append(test_case)
+                elif test_failed(test_case, eval_sm2):
+                    f2p_failure_2.append(test_case)
 
-        if f2p_failure_1 and f2p_success_2 and not f2p_success_1 and not f2p_failure_2:
-            score = 1
+            if f2p_failure_1 and f2p_success_2 and not f2p_success_1 and not f2p_failure_2:
+                score = 1
+            else:
+                score = 0
+
+            # smell_weighted_score = run_test_smells(pred_patch) * score
+            # ngram_weighted_score = run_similarity_score(pred_patch) * score
+            # neural_net_score = run_neural_net_scores(pred_patch, test_spec.test_patch)
+            n_gram_score = calculate_crystalbleu(pred_patch, test_spec.test_patch)
+
+            scores = {
+                "base": score,
+                "weighted_n-gram": 0.5 + (0.5 * n_gram_score) if score == 1 else 0,
+                "fail_to_pass_detected": fail_to_pass,
+                "gold_fail_to_pass": test_spec.FAIL_TO_PASS,
+                # "weighted_neural-net": 0.5 + (0.5 * neural_net_score) if score == 1 else 0,
+            }
         else:
-            score = 0
+            apply_patch(pred_patch)
+            test_command = "python reproduce_bug.py"
+            
+            eval_script_list = make_eval_script_list(repo, version, specs, env_name, repo_directory, base_commit, pred_patch, test_command)
+            eval_script = "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list) + "\n"
+            log_dir = RUN_EVALUATION_LOG_DIR / run_id / model_name_or_path / instance_id
+            log_dir.mkdir(parents=True, exist_ok=True)
+            eval_file = Path(log_dir / "eval.sh")
+            eval_file.write_text(eval_script)
+            copy_to_container(container, eval_file, Path("/eval.sh"))
 
-        # smell_weighted_score = run_test_smells(pred_patch) * score
-        # ngram_weighted_score = run_similarity_score(pred_patch) * score
-        neural_net_score = run_neural_net_scores(pred_patch, test_spec.test_patch)
-        n_gram_score = calculate_crystalbleu(pred_patch, test_spec.test_patch)
+            result1, timed_out1, total_runtime1 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
+            result1_output_path = log_dir / "result_output1.txt"
+            with open(result1_output_path, "w") as f:
+                f.write(result1)
+                if timed_out1:
+                    f.write(f"\n\nTimeout error: {timeout} seconds exceeded.")
+                    raise EvaluationError(
+                        instance_id,
+                        f"Test timed out after {timeout} seconds.",
+                    )
+            f2p_success_1 = True if "Issue resolved" in result1 else False
 
-        scores = {
-            "base": score,
-            "weighted_n-gram": 0.5 + (0.5 * n_gram_score) if score == 1 else 0,
-            "weighted_neural-net": 0.5 + (0.5 * neural_net_score) if score == 1 else 0,
-        }
+            apply_patch(test_spec.gold_patch)
+            result2, timed_out2, total_runtime2 = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
+
+
+            result2_output_path = log_dir / "result_output2.txt"
+            with open(result2_output_path, "w") as f:
+                f.write(result2)
+                if timed_out2:
+                    f.write(f"\n\nTimeout error: {timeout} seconds exceeded.")
+                    raise EvaluationError(
+                        instance_id,
+                        f"Test timed out after {timeout} seconds.",
+                    )
+            f2p_success_2 = True if "Issue resolved" in result2 else False
+
+            if f2p_success_2 and not f2p_success_1:
+                score = 1
+            else:
+                score = 0
+
+            scores = {
+                "base": score
+            }
 
         with open(log_dir / "report.json", "w") as f:
             json.dump(scores, f, indent=4)
