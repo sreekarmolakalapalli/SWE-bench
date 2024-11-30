@@ -345,7 +345,8 @@ def run_neural_net_scores(submitted_test_patch, gold_test_patch):
 
 def get_modified_or_added_functions_for_file(diff: str, file_name: str) -> list:
     """
-    Extract the names of functions modified or added in a specific file within a Git diff.
+    Extract the names of functions modified or added in a specific file within a Git diff,
+    ignoring modifications that are only whitespace or unrelated changes.
 
     Args:
         diff (str): The Git diff as a string.
@@ -356,8 +357,9 @@ def get_modified_or_added_functions_for_file(diff: str, file_name: str) -> list:
     """
     # Pattern to identify the start of changes for a file
     file_header_pattern = re.compile(rf"^diff --git a/{re.escape(file_name)} b/{re.escape(file_name)}", re.MULTILINE)
-    function_pattern = re.compile(r"^\+.*\bdef\s+(\w+)\s*\(", re.MULTILINE)
-    modified_function_pattern = re.compile(r"@@.*?@@.*?(\w+)\s*\(", re.MULTILINE)
+    function_def_pattern = re.compile(r"^\+\s*(?<![^\s+-])def\s+(\w+)\s*\(", re.MULTILINE)
+    context_pattern = re.compile(r"@@.*?@@", re.MULTILINE)
+    function_boundary_pattern = re.compile(r"^\s*(?:\+)?\s*(?:@.*|(?<![^\s+-])def\s+\w+\s*\()", re.MULTILINE)
 
     # Split the diff into sections for each file
     file_sections = file_header_pattern.split(diff)
@@ -369,9 +371,42 @@ def get_modified_or_added_functions_for_file(diff: str, file_name: str) -> list:
     # Focus on the section corresponding to the specified file
     file_diff = file_sections[1]
 
-    # Find function additions and modifications in the file diff
-    added_functions = function_pattern.findall(file_diff)
-    modified_functions = modified_function_pattern.findall(file_diff)
+    # Extract added function names
+    added_functions = []
+    for line in file_diff.splitlines():
+        if function_def_pattern.findall(line):
+            added_functions += function_def_pattern.findall(line)
+
+    # Extract modified functions while ensuring the changes are within function boundaries
+    modified_functions = []
+    context_blocks = context_pattern.finditer(file_diff)
+    
+    for context in context_blocks:
+        context_start = context.start()
+        context_end = file_diff.find("\n", context_start)
+        if context_end == -1:
+            context_end = len(file_diff)
+
+        # Extract the context block
+        context_block = file_diff[context_start:context_end]
+        function_name_match = re.search(r"def\s+(\w+)\s*\(", context_block)
+        if not function_name_match:
+            continue  # Skip if no function name is associated with this block
+
+        function_name = function_name_match.group(1)
+
+        # Determine the function's body boundaries
+        body_start = file_diff.find(context_block)
+        next_function_match = function_boundary_pattern.search(file_diff, body_start + 1)
+        body_end = next_function_match.start() if next_function_match else len(file_diff)
+
+        # Extract changes within the function's body
+        function_body = file_diff[body_start:body_end]
+        changes = [line[1:] for line in function_body.splitlines() if line.startswith(("+", "-"))]
+        substantive_changes = [line for line in changes if line.strip() and not line.isspace()]
+
+        if substantive_changes:
+            modified_functions.append(function_name)
 
     # Combine and deduplicate function names
     return list(set(added_functions + modified_functions))
