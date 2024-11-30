@@ -337,8 +337,11 @@ def run_instance(
             else:
                 score = 0
 
+            n_gram_score = calculate_crystalbleu(pred_patch, test_spec.test_patch)
+
             scores = {
-                "base": score
+                "base": score,
+                "weighted_n-gram": 0.5 + (0.5 * n_gram_score) if score == 1 else 0,
             }
 
         with open(log_dir / "report.json", "w") as f:
