@@ -50,7 +50,7 @@ from swebench.harness.docker_build import (
 )
 from swebench.harness.reinforest_utils import (
     parse_test_command,
-    run_neural_net_scores,
+    # run_neural_net_scores,
     get_modified_or_added_functions_for_file,
 )
 from swebench.harness.grading import get_logs_eval, test_passed, test_failed
