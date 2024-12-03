@@ -289,9 +289,11 @@ def run_instance(
             scores = {
                 "base": score,
                 "weighted_n-gram": 0.5 + (0.5 * n_gram_score) if score == 1 else 0,
+                # "weighted_neural-net": 0.5 + (0.5 * neural_net_score) if score == 1 else 0,
+                "model_patch": pred_patch,
+                "gold_patch": test_spec.test_patch,
                 "fail_to_pass_detected": fail_to_pass,
                 "gold_fail_to_pass": test_spec.FAIL_TO_PASS,
-                # "weighted_neural-net": 0.5 + (0.5 * neural_net_score) if score == 1 else 0,
             }
         else:
             apply_patch(pred_patch)
@@ -338,10 +340,14 @@ def run_instance(
                 score = 0
 
             n_gram_score = calculate_crystalbleu(pred_patch, test_spec.test_patch)
+            # neural_net_score = run_neural_net_scores(pred_patch, test_spec.test_patch)
 
             scores = {
                 "base": score,
                 "weighted_n-gram": 0.5 + (0.5 * n_gram_score) if score == 1 else 0,
+                # "weighted_neural-net": 0.5 + (0.5 * neural_net_score) if score == 1 else 0,
+                "model_patch": pred_patch,
+                "gold_patch": test_spec.test_patch,
             }
 
         with open(log_dir / "report.json", "w") as f:
