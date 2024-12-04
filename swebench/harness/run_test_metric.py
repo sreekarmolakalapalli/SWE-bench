@@ -170,12 +170,13 @@ def run_instance(
     container.start()
 
     def apply_patch(patch: str):
-            patch_file = Path(f"patch_{instance_id}.diff")
-            patch_file.write_text(patch or "")
-            copy_to_container(container, patch_file, Path("/tmp/patch.diff"))
+            src_file = Path(f"patch_{instance_id}.diff")
+            src_file.write_text(patch or "")
+            dst_file = Path(f"/tmp/patch_{instance_id}.diff")
+            copy_to_container(container, src_file, dst_file)
 
             val = container.exec_run(
-                "git apply --allow-empty -v /tmp/patch.diff",
+                f"git apply --allow-empty -v {dst_file}",
                 workdir="/testbed",
                 user="root",
             )
@@ -184,7 +185,7 @@ def run_instance(
                 
                 # try "patch --batch --fuzz=5 -p1 -i {patch_path}" to try again
                 val = container.exec_run(
-                    "patch --batch --fuzz=5 -p1 -i /tmp/patch.diff",
+                    f"patch --batch --fuzz=5 -p1 -i {dst_file}",
                     workdir="/testbed",
                     user="root",
                 )
