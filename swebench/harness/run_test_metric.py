@@ -170,9 +170,9 @@ def run_instance(
     container.start()
 
     def apply_patch(patch: str):
-            patch_file = Path("patch.diff")
+            patch_file = Path(f"{instance_id}/patch.diff")
             patch_file.write_text(patch or "")
-            copy_to_container(container, patch_file, Path(f"/tmp/{instance_id}/patch.diff"))
+            copy_to_container(container, patch_file, Path("/tmp/patch.diff"))
 
             val = container.exec_run(
                 "git apply --allow-empty -v /tmp/patch.diff",
