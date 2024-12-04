@@ -170,7 +170,9 @@ def run_instance(
     container.start()
 
     def apply_patch(patch: str):
-            src_file = Path(f"patch_{instance_id}.diff")
+            if not Path("tmp_patches").exists():
+                os.mkdir("tmp_patches")
+            src_file = Path(f"tmp_patches/patch_{instance_id}.diff")
             src_file.write_text(patch or "")
             dst_file = Path(f"/tmp/patch_{instance_id}.diff")
             copy_to_container(container, src_file, dst_file)

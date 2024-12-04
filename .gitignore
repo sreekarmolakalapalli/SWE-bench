@@ -173,3 +173,4 @@ notebooks/
 swebench/harness/models
 playground/
 python_dataset
+tmp_patches
