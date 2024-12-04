@@ -287,11 +287,11 @@ def run_instance(
             # smell_weighted_score = run_test_smells(pred_patch) * score
             # ngram_weighted_score = run_similarity_score(pred_patch) * score
             # neural_net_score = run_neural_net_scores(pred_patch, test_spec.test_patch)
-            n_gram_score = calculate_crystalbleu(pred_patch, test_spec.test_patch)
+            # n_gram_score = calculate_crystalbleu(pred_patch, test_spec.test_patch)
 
             scores = {
                 "base": score,
-                "weighted_n-gram": 0.5 + (0.5 * n_gram_score) if score == 1 else 0,
+                # "weighted_n-gram": 0.5 + (0.5 * n_gram_score) if score == 1 else 0,
                 # "weighted_neural-net": 0.5 + (0.5 * neural_net_score) if score == 1 else 0,
                 "model_patch": pred_patch,
                 "gold_patch": test_spec.test_patch,
@@ -342,12 +342,12 @@ def run_instance(
             else:
                 score = 0
 
-            n_gram_score = calculate_crystalbleu(pred_patch, test_spec.test_patch)
+            # n_gram_score = calculate_crystalbleu(pred_patch, test_spec.test_patch)
             # neural_net_score = run_neural_net_scores(pred_patch, test_spec.test_patch)
 
             scores = {
                 "base": score,
-                "weighted_n-gram": 0.5 + (0.5 * n_gram_score) if score == 1 else 0,
+                # "weighted_n-gram": 0.5 + (0.5 * n_gram_score) if score == 1 else 0,
                 # "weighted_neural-net": 0.5 + (0.5 * neural_net_score) if score == 1 else 0,
                 "model_patch": pred_patch,
                 "gold_patch": test_spec.test_patch,
