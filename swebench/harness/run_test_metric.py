@@ -211,7 +211,7 @@ def run_instance(
         model_name_or_path = prediction.get("model_name_or_path", "None").replace("/", "__")
         # pred_patch = test_spec.test_patch
         ## COMMENTED OUT CODE BELOW IS FOR THE REAL RUN, ABOVE IS A PLACEHOLDER FOR DEVELOPMENT
-        pred_patch = prediction['test_patch']
+        pred_patch = prediction['model_patch']
 
         if model_name_or_path != "agentless":
             apply_patch(pred_patch)
@@ -517,7 +517,7 @@ def get_dataset_from_preds(
         print(f"{len(completed_ids)} instances already run, skipping...")
         dataset = [i for i in dataset if i[KEY_INSTANCE_ID] not in completed_ids]
 
-    empty_patch_ids = {k for k, v in predictions.items() if v["test_patch"] == "" or v["test_patch"] is None}
+    empty_patch_ids = {k for k, v in predictions.items() if v["model_patch"] == "" or v["model_patch"] is None}
 
     # filter dataset to only instances with predictions
     dataset = [i for i in dataset if i[KEY_INSTANCE_ID] in prediction_ids and i[KEY_INSTANCE_ID] not in empty_patch_ids]
